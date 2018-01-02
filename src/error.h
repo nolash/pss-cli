@@ -1,0 +1,11 @@
+#ifndef PSSCLI_ERROR_H_
+#define PSSCLI_ERROR_H_
+
+enum psscli_error {
+	PSSCLI_ERROR_OK,
+	PSSCLI_ERROR_MEM,
+	PSSCLI_ERROR_NOINIT,
+	PSSCLI_ERROR_PEERS_FULL,
+};
+
+#endif // PSSCLI_ERROR_H_
