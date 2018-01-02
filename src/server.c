@@ -12,16 +12,14 @@
 #include "ws.h"
 
 extern struct psscli_ws_ psscli_ws;
-int pipefd[2];
+char psscli_cmd_queue_next_;
+char psscli_cmd_queue_last_;
 
 int psscli_server_cb(struct lws *wsi, enum lws_callback_reasons reason, void *user, void *in, size_t len) {
 	char n;
 	switch (reason) {
 		case LWS_CALLBACK_CLIENT_WRITEABLE:
-			lwsl_info("writable");
-			if (read(pipefd[1], &n, 1) < 0) {
-				raise(SIGINT);	
-			}
+			printf("read (%d) %d -> %d, %p / %p\n", pthread_self(), psscli_cmd_queue_next_, psscli_cmd_queue_last_, &psscli_cmd_queue_next_, &psscli_cmd_queue_last_);
 			while (psscli_cmd_queue_next_ != psscli_cmd_queue_last_) {
 				psscli_cmd_queue_next_++;
 				psscli_cmd_queue_next_ %= PSSCLI_SERVER_CMD_QUEUE_MAX;
@@ -32,9 +30,7 @@ int psscli_server_cb(struct lws *wsi, enum lws_callback_reasons reason, void *us
 			}
 			break;
 		case LWS_CALLBACK_CLIENT_ESTABLISHED:
-			lws_callback_on_writable(wsi);
 			break;
-
 		case LWS_CALLBACK_CLIENT_CONNECTION_ERROR:
 			lwsl_notice("err %d\n", reason);
 			raise(SIGINT);
@@ -42,6 +38,10 @@ int psscli_server_cb(struct lws *wsi, enum lws_callback_reasons reason, void *us
 		case LWS_CALLBACK_GET_THREAD_ID:
 			lwsl_notice("pthread %d\n", pthread_self());
 			return pthread_self();
+			break;
+		case LWS_CALLBACK_CLIENT_RECEIVE:
+			lwsl_notice("recv %d!\n", len);
+			break;
 		default:
 			lwsl_notice("%d\n", reason);
 	}
@@ -68,9 +68,6 @@ int psscli_server_start() {
 	char buf[PSSCLI_SERVER_SOCKET_BUFFER_SIZE];
 	char t;
 
-	if (pipe(pipefd) < 0) {
-		return 1;
-	}
 	if (!stat(PSSCLI_SERVER_SOCKET_PATH, &fstat)) {
 		unlink(PSSCLI_SERVER_SOCKET_PATH);
 		//return 1;
@@ -105,9 +102,11 @@ int psscli_server_start() {
 		psscli_cmd_free(cmd);
 		l = recv(s2, &buf, 1, 0);
 		cmd->code = *((unsigned char*)&buf);
+		printf("write (%d) %d -> %d, %p / %p\n", pthread_self(), psscli_cmd_queue_next_, psscli_cmd_queue_last_, &psscli_cmd_queue_next_, &psscli_cmd_queue_last_);
 		switch (cmd->code) {
 			case PSSCLI_CMD_BASEADDR:
-				if (write(pipefd[1], &t, 1) < 0) {
+				l = write(psscli_ws.notify[1], &t, 1);
+				if (l < 0) {
 					raise(SIGINT);
 				}
 				break;
@@ -121,18 +120,3 @@ int psscli_server_start() {
 
 }
 
-int psscli_server_process() {
-	int c;
-
-	c = 0;
-//	while (psscli_cmd_queue_last_ != psscli_cmd_queue_next_) {
-//		psscli_cmd *cmd;
-//
-//		cmd = psscli_cmd_queue_[psscli_cmd_queue_next_];
-//		if (!psscli_ws_send(cmd)) {
-//			psscli_cmd_queue_next_++;
-//			psscli_cmd_queue_next_ %= PSSCLI_SERVER_CMD_QUEUE_MAX;
-//		}
-//	}
-	return c;
-}

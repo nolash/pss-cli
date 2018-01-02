@@ -11,8 +11,6 @@
 // \todo change to init function to fill in callback in ws
 int psscli_server_cb(struct lws *wsi, enum lws_callback_reasons reason, void *user, void *in, size_t len);
 psscli_cmd psscli_cmd_queue_[PSSCLI_SERVER_CMD_QUEUE_MAX];
-char psscli_cmd_queue_next_;
-char psscli_cmd_queue_last_;
 
 int psscli_server_start();
 

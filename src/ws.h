@@ -22,7 +22,7 @@ typedef struct psscli_cmd {
 
 struct psscli_ws_ {
 	pid_t pid;
-	void *trigger;
+	int notify[2];
 	struct lws *w;
 	struct lws_client_connect_info wi;
 	struct lws_context_creation_info wci;
