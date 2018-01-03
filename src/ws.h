@@ -28,6 +28,7 @@ typedef struct psscli_response_ {
 
 struct psscli_ws_ {
 	pid_t pid;
+	int connected;
 	int notify[2];
 	struct lws *w;
 	struct lws_client_connect_info wi;

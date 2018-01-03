@@ -15,6 +15,7 @@ struct lws_protocols psscli_protocols_[] = {
 int psscli_ws_init(psscli_ws_callback callback) {
 	//struct lws_context_creation_info wci;
 
+
 	psscli_protocols_[0].callback = (void*)callback;
 	memset(&(psscli_ws.wci), 0, sizeof(psscli_ws.wci));
 	psscli_ws.wci.uid = -1;

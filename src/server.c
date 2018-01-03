@@ -20,6 +20,9 @@ int psscli_response_queue_last_;
 unsigned int s;
 struct sigaction sa_parent;
 
+/***
+ * \todo add lws_rx_flow_control() if response queue is full
+ */
 int psscli_server_cb(struct lws *wsi, enum lws_callback_reasons reason, void *user, void *in, size_t len) {
 	int n;
 	switch (reason) {
@@ -35,6 +38,7 @@ int psscli_server_cb(struct lws *wsi, enum lws_callback_reasons reason, void *us
 			}
 			break;
 		case LWS_CALLBACK_CLIENT_ESTABLISHED:
+			psscli_ws.connected = 1;
 			break;
 		case LWS_CALLBACK_CLIENT_CONNECTION_ERROR:
 			lwsl_notice("err %d (thread %d)\n", reason, pthread_self());
@@ -161,4 +165,16 @@ int psscli_server_start() {
 
 }
 
+char* psscli_server_socket_path() {
+	return PSSCLI_SERVER_SOCKET_PATH;
+}
 
+int psscli_server_shift(psscli_response *r) {
+	if (psscli_response_queue_last_ == psscli_response_queue_next_) {
+		return 1;
+	}
+	memcpy(r, &psscli_response_queue_[psscli_response_queue_next_], sizeof(psscli_response));
+	psscli_response_queue_next_++;
+	psscli_response_queue_next_ %= PSSCLI_SERVER_RESPONSE_QUEUE_MAX;
+	return 0;
+}
