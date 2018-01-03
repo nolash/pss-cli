@@ -1,6 +1,9 @@
 #ifndef PSSCLI_H_
 #define PSSCLI_H_
 
+#define PSSCLI_VERSION_MAJOR 2
+#define PSSCLI_VERSION_MINOR 0
+
 #include "bits.h"
 
 psscli* psscli_new(void);

@@ -1,5 +1,6 @@
 #include <stdlib.h>
 #include <string.h>
+#include <stdio.h>
 
 #include "psscli.h"
 #include "error.h"
@@ -20,6 +21,9 @@ psscli* psscli_new(void) {
 		return NULL;
 	}
 	c->init = 1;
+
+	sprintf(c->version, "%d.%d", PSSCLI_VERSION_MAJOR, PSSCLI_VERSION_MINOR);
+
 	return c;
 }
 
@@ -84,4 +88,8 @@ void psscli_free(psscli *c) {
 		}
 		free(c);
 	}
+}
+
+void psscli_version_string(char *str) {
+	
 }

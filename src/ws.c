@@ -2,6 +2,8 @@
 #include <string.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <json-c/json.h>
+#include <stdlib.h>
 
 #include "ws.h"
 
@@ -12,10 +14,12 @@ struct lws_protocols psscli_protocols_[] = {
 	{ NULL, NULL, 0, 0}
 };
 
-int psscli_ws_init(psscli_ws_callback callback) {
-	//struct lws_context_creation_info wci;
+int psscli_ws_write_(struct lws *ws, char *buf, int buflen, enum lws_write_protocol wp);
+int psscli_ws_json_(char *json_string, int json_string_len, enum psscli_cmd_code code, int cargc, void **cargv);
 
+json_object *j_version;
 
+int psscli_ws_init(psscli_ws_callback callback, const char *version) {
 	psscli_protocols_[0].callback = (void*)callback;
 	memset(&(psscli_ws.wci), 0, sizeof(psscli_ws.wci));
 	psscli_ws.wci.uid = -1;
@@ -39,6 +43,7 @@ int psscli_ws_init(psscli_ws_callback callback) {
 	psscli_ws.wi.pwsi = &(psscli_ws.w);
 	psscli_ws.wi.ietf_version_or_minus_one = -1;
 
+	// use pipe to insert into the send queue between command unix socket and websocket
 	if (pipe(psscli_ws.notify) < 0) {
 		return 1;
 	}
@@ -46,9 +51,13 @@ int psscli_ws_init(psscli_ws_callback callback) {
 
 	psscli_ws.pid = getpid();
 
+	j_version = json_object_new_string(version);
+
 	return 0;
 }
 
+// connects to websocket on swarm (pss) node
+// polls for servicing the websocket and reads from command unix socket pipe every turn
 void *psscli_ws_connect(void *v) {
 	char n;
 	lws_client_connect_via_info(&psscli_ws.wi);
@@ -69,13 +78,58 @@ void psscli_ws_free() {
 
 int psscli_ws_send(psscli_cmd *cmd) {
 	char in_buf[1024];
-	int n;
+	int r;
+	json_object *j;
+
+	r = psscli_ws_json_(in_buf + LWS_PRE, 1024 - LWS_PRE, cmd);
+	if (r) {
+		return 2;
+	}
+
+	fprintf(stderr, "sending: %s\n", &in_buf[LWS_PRE]);
+	r = psscli_ws_write_(psscli_ws.w, &in_buf[LWS_PRE], strlen(&in_buf[LWS_PRE]), LWS_WRITE_TEXT);
+	if (r < 0) {
+		return 3;
+	}
+
+	return 0;
+}
+
+// wrapper for lws_write to increment rcp call id after successful calls
+int psscli_ws_write_(struct lws *ws, char *buf, int buflen, enum lws_write_protocol wp) {
+	int r;
+	r = lws_write(ws, buf, buflen, wp);
+	if (r > 0) {
+		psscli_ws.id++;
+	}
+	return r;
+}
+
+int psscli_ws_json_(char *json_string, int json_string_len, psscli_cmd *cmd) {
+	json_object *j;
+	json_object *j_id;
+	json_object *j_method;
+	char method[64];
+
+	j = json_object_new_object();
+	json_object_object_add(j, "jsonrpc", j_version);
+
 	switch(cmd->code) {
 		case PSSCLI_CMD_BASEADDR:
-			strcpy(in_buf + LWS_PRE, "{\"jsonrpc\":\"2.0\",\"id\":0,\"method\":\"pss_baseAddr\",\"params\":null}");
-			n = lws_write(psscli_ws.w, &in_buf[LWS_PRE], strlen(&in_buf[LWS_PRE]), LWS_WRITE_TEXT);
+			strcpy(method, "pss_baseAddr");
 			break;
+		case PSSCLI_CMD_SETPEERPUBLICKEY:
+			strcpy(method, "pss_setPeerPublickey");
+			break;
+		default: 
+			return 1;
 
 	}
+
+	j_id = json_object_new_int64(psscli_ws.id);
+	json_object_object_add(j, "id", j_id);
+	j_method = json_object_new_string(method);
+	json_object_object_add(j, "method", j_method);
+	strcpy(json_string, json_object_to_json_string_ext(j, JSON_C_TO_STRING_PLAIN));
 	return 0;
 }

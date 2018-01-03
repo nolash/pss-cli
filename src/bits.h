@@ -22,6 +22,7 @@ typedef struct psscli_ {
 	psscli_peer self;
 	psscli_peer *peers;
 	int peer_count;
+	char version[16];
 } psscli;
 
 #endif // PSSCLI_BITS_H_

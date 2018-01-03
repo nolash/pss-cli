@@ -1,11 +1,11 @@
 #include <sys/wait.h>
 #include <sys/un.h>
 #include <unistd.h>
-#include <errno.h>
 #include <string.h>
 #include <stdio.h>
 #include <signal.h>
 #include <pthread.h>
+#include <sys/time.h>
 
 #include "server.h"
 #include "ws.h"
@@ -14,11 +14,13 @@ extern struct psscli_ws_ psscli_ws;
 pthread_t p1;
 pthread_t p2;
 
+// sigint handler
 void croak(int sig) {
 	fprintf(stderr, "killing %d by thread %d\n", psscli_ws.pid, pthread_self());
 	psscli_ws.pid = 0;
 }
 
+// wrappers for pthread routines
 void* server_start(void *v) {
 	fprintf(stderr, "sockserver thread: %d\n", p1);
 	psscli_server_start(NULL);
@@ -40,15 +42,18 @@ int main() {
 	char c;
 	struct sockaddr_un rs;
 	psscli_response res;
+	struct timespec ts;
 
+	// initialize websocket params
 	psscli_ws.host = "localhost";
 	psscli_ws.origin = psscli_ws.host;
 	psscli_ws.port = 8546;
 	psscli_ws.ssl = 0;
-	if (psscli_ws_init(psscli_server_cb)) {
+	if (psscli_ws_init(psscli_server_cb, "2.0")) {
 		return 1;
 	}
 
+	// separate threads for the unix socket server (for piping commands) and websocket
 	r = pthread_create(&p1, NULL, server_start, NULL);
 	if (r) {
 		return 2;
@@ -58,15 +63,22 @@ int main() {
 		return 2;
 	}
 
+	// we use sigint to end
 	sa.sa_handler = croak;
 	sa.sa_flags = 0;
 	sigemptyset(&sa.sa_mask);
 	sigaction(SIGINT, &sa, NULL);
 
+	// timeout for polling read/write ready
+	ts.tv_sec = 0;
+	ts.tv_nsec = 50000000;
+
+	// wait until websocket is connected
 	while (!psscli_ws.connected) {
-		sleep(1);
+		nanosleep(&ts, NULL);
 	}
 
+	// send command on socket
 	if ((s = socket(AF_UNIX, SOCK_STREAM, 0)) == -1) {
 		return 3;
 	}
@@ -76,24 +88,21 @@ int main() {
 	if (connect(s, (struct sockaddr *)&rs, l) == -1) {
 		return 3;
 	}
-
 	c = 1;
 	if (send(s, &c, 1, 0) == -1) {
 		return 4;
 	}
-	printf("sending\n");
 	close(s);
 
-	
+	// poll for response	
 	while (psscli_server_shift(&res)) {
-		sleep(1);
+		nanosleep(&ts, NULL);
 	}
-	printf("response: %s\n", res.content);
-	raise(SIGINT);
 
+	// response received, shutdown
+	raise(SIGINT);
 	pthread_join(p1, NULL);
 	pthread_join(p2, NULL);
-
 	psscli_ws_free();
 
 	return 0;

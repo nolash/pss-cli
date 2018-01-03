@@ -27,7 +27,7 @@ int psscli_server_cb(struct lws *wsi, enum lws_callback_reasons reason, void *us
 	int n;
 	switch (reason) {
 		case LWS_CALLBACK_CLIENT_WRITEABLE:
-			printf("read (%d) %d -> %d, %p / %p\n", pthread_self(), psscli_cmd_queue_next_, psscli_cmd_queue_last_, &psscli_cmd_queue_next_, &psscli_cmd_queue_last_);
+			//printf("read (%d) %d -> %d, %p / %p\n", pthread_self(), psscli_cmd_queue_next_, psscli_cmd_queue_last_, &psscli_cmd_queue_next_, &psscli_cmd_queue_last_);
 			while (psscli_cmd_queue_next_ != psscli_cmd_queue_last_) {
 				psscli_cmd_queue_next_++;
 				psscli_cmd_queue_next_ %= PSSCLI_SERVER_CMD_QUEUE_MAX;
@@ -83,7 +83,6 @@ void psscli_cmd_free(psscli_cmd *cmd) {
 }
 
 void psscli_server_sigint_(int s) {
-	printf("sigint server\n");
 	close(s);
 	sa_parent.sa_handler(SIGINT);
 }
@@ -147,7 +146,7 @@ int psscli_server_start() {
 		psscli_cmd_free(cmd);
 		l = recv(s2, &buf, 1, 0);
 		cmd->code = *((unsigned char*)&buf);
-		printf("write (%d) %d -> %d, %p / %p\n", pthread_self(), psscli_cmd_queue_next_, psscli_cmd_queue_last_, &psscli_cmd_queue_next_, &psscli_cmd_queue_last_);
+		//printf("write (%d) %d -> %d, %p / %p\n", pthread_self(), psscli_cmd_queue_next_, psscli_cmd_queue_last_, &psscli_cmd_queue_next_, &psscli_cmd_queue_last_);
 		switch (cmd->code) {
 			case PSSCLI_CMD_BASEADDR:
 				l = write(psscli_ws.notify[1], &t, 1);

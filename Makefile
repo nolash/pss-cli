@@ -19,7 +19,7 @@ test-loadpeers: obj
 
 test-server: obj
 	gcc -g3 ${INCLUDE} -o ${BUILDDIR}/test_server.o -c ${TESTDIR}/server.c
-	gcc -g3 ${INCLUDE} -o ${BUILDDIR}/test_server ${BUILDDIR}/test_server.o ${BUILDDIR}/server.o ${BUILDDIR}/ws.o -lwebsockets -lpthread
+	gcc -g3 ${INCLUDE} -o ${BUILDDIR}/test_server ${BUILDDIR}/test_server.o ${BUILDDIR}/server.o ${BUILDDIR}/ws.o -lwebsockets -lpthread -ljson-c
 
 clean:
 	rm -rf ${BUILDDIR}/*
