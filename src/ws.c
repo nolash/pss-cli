@@ -48,7 +48,7 @@ int psscli_ws_init(psscli_ws_callback callback) {
 	return 0;
 }
 
-int psscli_ws_connect() {
+void *psscli_ws_connect(void *v) {
 	char n;
 	lws_client_connect_via_info(&psscli_ws.wi);
 	while (psscli_ws.pid) {

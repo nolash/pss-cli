@@ -3,22 +3,35 @@
 #include <error.h>
 #include <stdio.h>
 #include <signal.h>
+#include <pthread.h>
 
 #include "server.h"
 #include "ws.h"
 
 extern struct psscli_ws_ psscli_ws;
-pid_t cpid;
+pthread_t p1;
+pthread_t p2;
 
 void croak(int sig) {
+	printf("killing %d by thread %d\n", psscli_ws.pid, pthread_self());
 	psscli_ws.pid = 0;
-	printf("killing %d\n", cpid);
-	kill(cpid, SIGINT);
-	wait(NULL);
+}
+
+void* server_start(void *v) {
+	printf("sockserver thread: %d\n", p1);
+	psscli_server_start(NULL);
+	pthread_exit(NULL);	
+}
+
+void* ws_connect(void *v) {
+	printf("websocket thread: %d\n", p2);
+	psscli_ws_connect(NULL);
+	pthread_kill(p1, SIGINT);
+	pthread_exit(NULL);
 }
 
 int main() {
-	pid_t pid;
+	int r;
 	struct sigaction sa;
 
 	psscli_ws.host = "localhost";
@@ -29,23 +42,23 @@ int main() {
 		return 1;
 	}
 
-	pid = fork();
-
-	if (!pid) {
-		if (psscli_server_start()) {
-		}
-		printf("child err: %d\n", errno);		
-		return 0;
+	r = pthread_create(&p1, NULL, server_start, NULL);
+	if (r) {
+		return 2;
 	}
-
-	cpid = pid;
+	r = pthread_create(&p2, NULL, ws_connect, NULL);
+	if (r) {
+		return 2;
+	}
 
 	sa.sa_handler = croak;
 	sa.sa_flags = 0;
 	sigemptyset(&sa.sa_mask);
 	sigaction(SIGINT, &sa, NULL);
 
-	psscli_ws_connect();
+	pthread_join(p1, NULL);
+	pthread_join(p2, NULL);
+
 	psscli_ws_free();
 
 	return 0;

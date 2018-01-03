@@ -14,9 +14,14 @@
 extern struct psscli_ws_ psscli_ws;
 char psscli_cmd_queue_next_;
 char psscli_cmd_queue_last_;
+int psscli_response_queue_next_;
+int psscli_response_queue_last_;
+
+unsigned int s;
+struct sigaction sa_parent;
 
 int psscli_server_cb(struct lws *wsi, enum lws_callback_reasons reason, void *user, void *in, size_t len) {
-	char n;
+	int n;
 	switch (reason) {
 		case LWS_CALLBACK_CLIENT_WRITEABLE:
 			printf("read (%d) %d -> %d, %p / %p\n", pthread_self(), psscli_cmd_queue_next_, psscli_cmd_queue_last_, &psscli_cmd_queue_next_, &psscli_cmd_queue_last_);
@@ -32,15 +37,28 @@ int psscli_server_cb(struct lws *wsi, enum lws_callback_reasons reason, void *us
 		case LWS_CALLBACK_CLIENT_ESTABLISHED:
 			break;
 		case LWS_CALLBACK_CLIENT_CONNECTION_ERROR:
-			lwsl_notice("err %d\n", reason);
-			raise(SIGINT);
+			lwsl_notice("err %d (thread %d)\n", reason, pthread_self());
+			psscli_ws.pid = 0;
+			//raise(SIGINT);
 			break;
 		case LWS_CALLBACK_GET_THREAD_ID:
 			lwsl_notice("pthread %d\n", pthread_self());
 			return pthread_self();
 			break;
 		case LWS_CALLBACK_CLIENT_RECEIVE:
-			lwsl_notice("recv %d!\n", len);
+			lwsl_notice("part recv: %s\n", in);
+			psscli_response *res = &psscli_response_queue_[psscli_response_queue_last_];
+			strcpy(res->content + res->length, in);
+			res->length += len;
+			if (*(char*)(in+len-1) == 0x0a) {
+				*(res->content + res->length - 1) = 0;
+				res->done = 1;
+				psscli_response_queue_last_++;
+				psscli_response_queue_last_ %= PSSCLI_SERVER_RESPONSE_QUEUE_MAX;
+				psscli_response_queue_[psscli_response_queue_last_].length = 0;
+				psscli_response_queue_[psscli_response_queue_last_].done = 0;
+				lwsl_notice("recv done: %s\n", res->content);
+			}
 			break;
 		default:
 			lwsl_notice("%d\n", reason);
@@ -60,13 +78,34 @@ void psscli_cmd_free(psscli_cmd *cmd) {
 	memset(&cmd, 0, sizeof(psscli_cmd));
 }
 
+void psscli_server_sigint_(int s) {
+	printf("sigint server\n");
+	close(s);
+	sa_parent.sa_handler(SIGINT);
+}
+
+int psscli_server_load_queue() {
+	psscli_cmd_queue_last_ = 0;
+	psscli_cmd_queue_next_ = 0;
+	psscli_response_queue_last_ = 0;
+	psscli_response_queue_next_ = 0;
+	memset(&psscli_cmd_queue_[0], 0, sizeof(psscli_cmd));
+	memset(&psscli_response_queue_[0], 0, sizeof(psscli_response));
+	return 0;
+}
 int psscli_server_start() {
-	unsigned int s, s2;
+	unsigned int s2;
 	struct sockaddr_un sl, sr;
 	int l;
 	struct stat fstat;
 	char buf[PSSCLI_SERVER_SOCKET_BUFFER_SIZE];
 	char t;
+	struct sigaction sa;
+
+	sa.sa_handler = psscli_server_sigint_;
+	sa.sa_flags = 0;
+	sigemptyset(&sa.sa_mask);
+	sigaction(SIGINT, &sa, &sa_parent);
 
 	if (!stat(PSSCLI_SERVER_SOCKET_PATH, &fstat)) {
 		unlink(PSSCLI_SERVER_SOCKET_PATH);
@@ -82,6 +121,8 @@ int psscli_server_start() {
 	}
 
 	listen(s, 5);
+
+	psscli_server_load_queue();
 
 	t = 1;
 	while (psscli_ws.pid) {
@@ -119,4 +160,5 @@ int psscli_server_start() {
 	return 0;
 
 }
+
 
