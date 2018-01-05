@@ -7,6 +7,7 @@
 #define PSSCLI_SERVER_CMD_QUEUE_MAX 64
 #define PSSCLI_SERVER_RESPONSE_QUEUE_MAX 64
 
+#include "cmd.h"
 #include "ws.h"
 
 char *psscli_server_socket_path();

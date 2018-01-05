@@ -5,6 +5,7 @@
 #include <json-c/json.h>
 #include <stdlib.h>
 
+#include "cmd.h"
 #include "ws.h"
 
 extern struct psscli_ws_ psscli_ws;
@@ -15,7 +16,7 @@ struct lws_protocols psscli_protocols_[] = {
 };
 
 int psscli_ws_write_(struct lws *ws, char *buf, int buflen, enum lws_write_protocol wp);
-int psscli_ws_json_(char *json_string, int json_string_len, enum psscli_cmd_code code, int cargc, void **cargv);
+int psscli_ws_json_(char *json_string, int json_string_len, psscli_cmd *cmd);
 
 json_object *j_version;
 
@@ -107,10 +108,12 @@ int psscli_ws_write_(struct lws *ws, char *buf, int buflen, enum lws_write_proto
 
 int psscli_ws_json_(char *json_string, int json_string_len, psscli_cmd *cmd) {
 	json_object *j;
-	json_object *j_id;
-	json_object *j_method;
+	json_object *jp;
+	json_object *jv;
 	char method[64];
+	char data[1024];
 
+	jp = NULL;
 	j = json_object_new_object();
 	json_object_object_add(j, "jsonrpc", j_version);
 
@@ -118,18 +121,26 @@ int psscli_ws_json_(char *json_string, int json_string_len, psscli_cmd *cmd) {
 		case PSSCLI_CMD_BASEADDR:
 			strcpy(method, "pss_baseAddr");
 			break;
+		case PSSCLI_CMD_GETPUBLICKEY:
+			strcpy(method, "pss_getPublicKey");
+			break;
 		case PSSCLI_CMD_SETPEERPUBLICKEY:
-			strcpy(method, "pss_setPeerPublickey");
+			strcpy(method, "pss_setPeerPublicKey");
+			jp = json_object_new_array();
+			jv = json_object_new_string(*(cmd->values));
+			json_object_array_add(jp, jv);
 			break;
 		default: 
 			return 1;
 
 	}
-
-	j_id = json_object_new_int64(psscli_ws.id);
-	json_object_object_add(j, "id", j_id);
-	j_method = json_object_new_string(method);
-	json_object_object_add(j, "method", j_method);
+	jv = json_object_new_int64(psscli_ws.id);
+	json_object_object_add(j, "id", jv);
+	jv = json_object_new_string(method);
+	json_object_object_add(j, "method", jv);
+	if (jp != NULL) {
+		json_object_object_add(j, "params", jp);
+	}
 	strcpy(json_string, json_object_to_json_string_ext(j, JSON_C_TO_STRING_PLAIN));
 	return 0;
 }

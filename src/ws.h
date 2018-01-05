@@ -5,27 +5,9 @@
 #define PSSCLI_WS_RX_BUFFER 128
 #define PSSCLI_WS_TX_BUFFER 1024
 #define PSSCLI_WS_LOOP_TIMEOUT 100
-#define PSSCLI_WS_RX_MAX 4096+256
 
 #include <libwebsockets.h>
-
-enum psscli_cmd_code {
-	PSSCLI_CMD_NONE,
-	PSSCLI_CMD_BASEADDR,
-	PSSCLI_CMD_SETPEERPUBLICKEY
-};
-
-typedef struct psscli_cmd_ {
-	enum psscli_cmd_code code;
-	char **values;
-	unsigned char valuecount;
-} psscli_cmd;
-
-typedef struct psscli_response_ {
-	char done;
-	char content[PSSCLI_WS_RX_MAX]; 
-	int length;
-} psscli_response;
+#include "cmd.h"
 
 struct psscli_ws_ {
 	pid_t pid; // maintain event loop while this is >0

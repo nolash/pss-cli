@@ -3,11 +3,13 @@
 #include <sys/stat.h>
 #include <sys/un.h>
 #include <pthread.h>
+#include <stdio.h>
 
 #include <string.h>
 #include <stdlib.h>
 #include <signal.h>
 
+#include "cmd.h"
 #include "server.h"
 #include "ws.h"
 
@@ -96,6 +98,12 @@ int psscli_server_load_queue() {
 	memset(&psscli_response_queue_[0], 0, sizeof(psscli_response));
 	return 0;
 }
+
+/***
+ *
+ * fork accept
+ *
+ */
 int psscli_server_start() {
 	unsigned int s2;
 	struct sockaddr_un sl, sr;
@@ -135,28 +143,39 @@ int psscli_server_start() {
 		l = sizeof(struct sockaddr_un);
 		s2 = accept(s, (struct sockaddr*)&sr, &l);
 
-		n = psscli_cmd_queue_last_ + 1;
-		n %= PSSCLI_SERVER_CMD_QUEUE_MAX;
-		if (n == psscli_cmd_queue_next_) {
-			continue;
-		}
-		psscli_cmd_queue_last_ = n;
+		while (l = recv(s2, &buf, 1, 0) > 0) {
 		
-		cmd = &psscli_cmd_queue_[psscli_cmd_queue_last_];
-		psscli_cmd_free(cmd);
-		l = recv(s2, &buf, 1, 0);
-		cmd->code = *((unsigned char*)&buf);
-		//printf("write (%d) %d -> %d, %p / %p\n", pthread_self(), psscli_cmd_queue_next_, psscli_cmd_queue_last_, &psscli_cmd_queue_next_, &psscli_cmd_queue_last_);
-		switch (cmd->code) {
-			case PSSCLI_CMD_BASEADDR:
-				l = write(psscli_ws.notify[1], &t, 1);
-				if (l < 0) {
-					raise(SIGINT);
-				}
-				break;
-			default:
-				psscli_cmd_queue_last_--;
-				psscli_cmd_queue_last_ %= PSSCLI_SERVER_CMD_QUEUE_MAX;
+			n = psscli_cmd_queue_last_ + 1;
+			n %= PSSCLI_SERVER_CMD_QUEUE_MAX;
+			if (n == psscli_cmd_queue_next_) {
+				continue;
+			}
+			psscli_cmd_queue_last_ = n;
+			
+			cmd = &psscli_cmd_queue_[psscli_cmd_queue_last_];
+			psscli_cmd_free(cmd);
+			cmd->code = *((unsigned char*)&buf);
+
+			printf("write (%d) %d -> %d, %p / %p\n", pthread_self(), psscli_cmd_queue_next_, psscli_cmd_queue_last_, &psscli_cmd_queue_next_, &psscli_cmd_queue_last_);
+			switch (cmd->code) {
+				case PSSCLI_CMD_BASEADDR:
+					l = write(psscli_ws.notify[1], &t, 1);
+					if (l < 0) {
+						raise(SIGINT);
+					}
+					break;
+				case PSSCLI_CMD_GETPUBLICKEY:
+					l = write(psscli_ws.notify[1], &t, 1);
+					if (l < 0) {
+						raise(SIGINT);
+					}
+					break;
+
+				default:
+					printf("foo\n");
+					psscli_cmd_queue_last_--;
+					psscli_cmd_queue_last_ %= PSSCLI_SERVER_CMD_QUEUE_MAX;
+			}
 		}
 	}
 

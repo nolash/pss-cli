@@ -10,6 +10,8 @@
 #include "server.h"
 #include "ws.h"
 
+#define TESTKEY "049cbde8b50e5420055ee1ee174dc1e61a8388933d12c66ad0e4e45bbe76cc93cd0c940d586f95bb36b65ae9241e1e57b54c8684f44c3a82351c892750afcb36f0"
+
 extern struct psscli_ws_ psscli_ws;
 pthread_t p1;
 pthread_t p2;
@@ -36,10 +38,10 @@ void* ws_connect(void *v) {
 
 int main() {
 	int r;
-	int s;
+	int s, s2;
 	int l;
 	struct sigaction sa;
-	char c;
+	char c[1024];
 	struct sockaddr_un rs;
 	psscli_response res;
 	struct timespec ts;
@@ -88,18 +90,28 @@ int main() {
 	if (connect(s, (struct sockaddr *)&rs, l) == -1) {
 		return 3;
 	}
-	c = 1;
+
+	c[0] = 1;
 	if (send(s, &c, 1, 0) == -1) {
 		return 4;
 	}
-	close(s);
 
 	// poll for response	
 	while (psscli_server_shift(&res)) {
 		nanosleep(&ts, NULL);
 	}
 
-	// response received, shutdown
+	c[0] = 2;	
+	if (send(s, &c, 1, 0) == -1) {
+		return 4;
+	}
+
+	while (psscli_server_shift(&res)) {
+		nanosleep(&ts, NULL);
+	}
+	close(s);
+
+	// responses received, shutdown
 	raise(SIGINT);
 	pthread_join(p1, NULL);
 	pthread_join(p2, NULL);
