@@ -10,7 +10,7 @@
 #include "server.h"
 #include "ws.h"
 
-#define TESTKEY "049cbde8b50e5420055ee1ee174dc1e61a8388933d12c66ad0e4e45bbe76cc93cd0c940d586f95bb36b65ae9241e1e57b54c8684f44c3a82351c892750afcb36f0"
+#define TESTKEY "049cbde8b50e5420055ee1ee174dc1e61a8388933d12c66ad0e4e45bbe76cc93cd0c940d586f95bb36b65ae9241e1e57b54c8684f44c3a82351c892750afcb36f000abcdef"
 
 extern struct psscli_ws_ psscli_ws;
 pthread_t p1;
@@ -109,6 +109,14 @@ int main() {
 	while (psscli_server_shift(&res)) {
 		nanosleep(&ts, NULL);
 	}
+
+	c[0] = 3;
+	strcpy(&c[1], TESTKEY);
+	if (send(s, &c, 139, 0) == -1) {
+		return 4;
+	}
+	l = recv(s, &c, 1, 0);
+	printf("got: %x %d\n", *(unsigned char*)&c, l);
 	close(s);
 
 	// responses received, shutdown

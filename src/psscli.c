@@ -39,11 +39,11 @@ enum psscli_error psscli_add_peer(psscli *c, const char *key, const char *addr, 
 	psscli_peer *peer;
 
 	if (c == NULL) {
-		return PSSCLI_ERROR_NOINIT;
+		return PSSCLI_ENOINIT;
 	}
 
 	if (PSSCLI_PEERS_MAX <= c->peer_count) {
-		return PSSCLI_ERROR_PEERS_FULL;
+		return PSSCLI_EFULL;
 	}
 
 	peer = c->peers + c->peer_count;
@@ -52,7 +52,7 @@ enum psscli_error psscli_add_peer(psscli *c, const char *key, const char *addr, 
 		if (strcmp(nick, "")) {
 			peer->nick = malloc(sizeof(char) * strlen(nick));
 			if (peer->nick == NULL) {
-				return PSSCLI_ERROR_MEM;
+				return PSSCLI_EMEM;
 			}
 		}
 	}
@@ -69,7 +69,7 @@ enum psscli_error psscli_add_peer(psscli *c, const char *key, const char *addr, 
 
 	c->peer_count++;
 
-	return PSSCLI_ERROR_OK;
+	return PSSCLI_EOK;
 }
 
 void psscli_free(psscli *c) {

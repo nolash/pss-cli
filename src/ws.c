@@ -129,6 +129,13 @@ int psscli_ws_json_(char *json_string, int json_string_len, psscli_cmd *cmd) {
 			jp = json_object_new_array();
 			jv = json_object_new_string(*(cmd->values));
 			json_object_array_add(jp, jv);
+			jv = json_object_new_string(*(cmd->values+1));
+			json_object_array_add(jp, jv);
+			jv = json_object_new_string("0x");
+			json_object_array_add(jp, jv);
+			free(*(cmd->values+1));
+			free(*(cmd->values));
+			free(cmd->values);
 			break;
 		default: 
 			return 1;

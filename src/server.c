@@ -4,6 +4,7 @@
 #include <sys/un.h>
 #include <pthread.h>
 #include <stdio.h>
+#include <fcntl.h>
 
 #include <string.h>
 #include <stdlib.h>
@@ -12,6 +13,7 @@
 #include "cmd.h"
 #include "server.h"
 #include "ws.h"
+#include "error.h"
 
 extern struct psscli_ws_ psscli_ws;
 char psscli_cmd_queue_next_;
@@ -135,7 +137,6 @@ int psscli_server_start() {
 
 	psscli_server_load_queue();
 
-	t = 1;
 	while (psscli_ws.pid) {
 		int n;
 		psscli_cmd *cmd;
@@ -144,7 +145,9 @@ int psscli_server_start() {
 		s2 = accept(s, (struct sockaddr*)&sr, &l);
 
 		while (l = recv(s2, &buf, 1, 0) > 0) {
-		
+			char t;
+			int m;
+
 			n = psscli_cmd_queue_last_ + 1;
 			n %= PSSCLI_SERVER_CMD_QUEUE_MAX;
 			if (n == psscli_cmd_queue_next_) {
@@ -159,18 +162,35 @@ int psscli_server_start() {
 			printf("write (%d) %d -> %d, %p / %p\n", pthread_self(), psscli_cmd_queue_next_, psscli_cmd_queue_last_, &psscli_cmd_queue_next_, &psscli_cmd_queue_last_);
 			switch (cmd->code) {
 				case PSSCLI_CMD_BASEADDR:
-					l = write(psscli_ws.notify[1], &t, 1);
+					l = write(psscli_ws.notify[1], &buf, 1);
 					if (l < 0) {
 						raise(SIGINT);
 					}
 					break;
 				case PSSCLI_CMD_GETPUBLICKEY:
-					l = write(psscli_ws.notify[1], &t, 1);
+					l = write(psscli_ws.notify[1], &buf, 1);
 					if (l < 0) {
 						raise(SIGINT);
 					}
 					break;
-
+				case PSSCLI_CMD_SETPEERPUBLICKEY:
+					l = recv(s2, &buf, 138, MSG_DONTWAIT);
+					if (l < 138) {
+						memset(&buf, (char)PSSCLI_EINVAL, 1);
+						errno = EPROTO;
+						send(s2, &buf, 1, 0);
+						continue;
+					}
+					psscli_cmd_queue_[psscli_cmd_queue_last_].values = malloc(sizeof(char*)*3);
+					*psscli_cmd_queue_[psscli_cmd_queue_last_].values = malloc(sizeof(char)*133);
+					strcpy(*psscli_cmd_queue_[psscli_cmd_queue_last_].values, "0x");
+					memcpy(*psscli_cmd_queue_[psscli_cmd_queue_last_].values+2, &buf, 132);
+					memset(*(psscli_cmd_queue_[psscli_cmd_queue_last_].values)+132, 0, 1);
+					*(psscli_cmd_queue_[psscli_cmd_queue_last_].values+1) = malloc(sizeof(char)*11);
+					strcpy(*(psscli_cmd_queue_[psscli_cmd_queue_last_].values+1), "0x");
+					memcpy(*(psscli_cmd_queue_[psscli_cmd_queue_last_].values+1)+2, &buf[130], 8);
+					l = write(psscli_ws.notify[1], &buf, 1);
+					break;
 				default:
 					printf("foo\n");
 					psscli_cmd_queue_last_--;
