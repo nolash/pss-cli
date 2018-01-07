@@ -9,8 +9,11 @@
 
 #include "server.h"
 #include "ws.h"
+#include "std.h"
 
-#define TESTKEY "049cbde8b50e5420055ee1ee174dc1e61a8388933d12c66ad0e4e45bbe76cc93cd0c940d586f95bb36b65ae9241e1e57b54c8684f44c3a82351c892750afcb36f000abcdef"
+#define TESTKEY "049cbde8b50e5420055ee1ee174dc1e61a8388933d12c66ad0e4e45bbe76cc93cd0c940d586f95bb36b65ae9241e1e57b54c8684f44c3a82351c892750afcb36f0"
+#define TESTTOPIC "deadbeef"
+#define TESTADDR "012345"
 
 extern struct psscli_ws_ psscli_ws;
 pthread_t p1;
@@ -40,6 +43,8 @@ int main() {
 	int r;
 	int s, s2;
 	int l;
+	short sl;
+
 	struct sigaction sa;
 	char c[1024];
 	struct sockaddr_un rs;
@@ -91,33 +96,73 @@ int main() {
 		return 3;
 	}
 
-	c[0] = 1;
+	// this method has no params
+	c[0] = PSSCLI_CMD_BASEADDR;
 	if (send(s, &c, 1, 0) == -1) {
 		return 4;
 	}
+	
+	// should return 0
+	l = recv(s, &c, 1, 0);
 
 	// poll for response	
 	while (psscli_server_shift(&res)) {
 		nanosleep(&ts, NULL);
 	}
 
-	c[0] = 2;	
+	// this method also has no params
+	c[0] = PSSCLI_CMD_GETPUBLICKEY;	
 	if (send(s, &c, 1, 0) == -1) {
 		return 4;
 	}
 
+	// should return 0
+	l = recv(s, &c, 1, 0);
+
+	// poll for response
 	while (psscli_server_shift(&res)) {
 		nanosleep(&ts, NULL);
 	}
 
-	c[0] = 3;
-	strcpy(&c[1], TESTKEY);
-	if (send(s, &c, 139, 0) == -1) {
+	// this method has 2 required and 1 optional param
+	c[0] = PSSCLI_CMD_SETPEERPUBLICKEY;
+
+	// insert public key prefixed by length (little endian short)
+	sl = (short)strlen(TESTKEY);
+	if (!is_le()) {
+		int16_rev(&sl);
+	}
+	memcpy(&c[1], &sl, 2);
+	strcpy(&c[3], TESTKEY);
+
+	// insert topic prefixed by length
+	sl = (short)strlen(TESTTOPIC);
+	if (!is_le()) {
+		int16_rev(&sl);
+	}
+	memcpy(&c[3+strlen(TESTKEY)], &sl, 2);
+	strcpy(&c[5+strlen(TESTKEY)], TESTTOPIC);
+
+	// insert address prefixed by length
+	sl = (short)strlen(TESTADDR);
+	if (!is_le()) {
+		int16_rev(&sl);
+	}
+	memcpy(&c[5+strlen(TESTKEY)+strlen(TESTTOPIC)], &sl, 2);
+	strcpy(&c[7+strlen(TESTKEY)+strlen(TESTTOPIC)], TESTADDR);
+	if (send(s, &c, 7+strlen(TESTKEY)+strlen(TESTTOPIC)+strlen(TESTADDR), 0) == -1) {
 		return 4;
 	}
+
+	// should return 0
 	l = recv(s, &c, 1, 0);
 	printf("got: %x %d\n", *(unsigned char*)&c, l);
 	close(s);
+
+	// poll for response
+	while (psscli_server_shift(&res)) {
+		nanosleep(&ts, NULL);
+	}
 
 	// responses received, shutdown
 	raise(SIGINT);

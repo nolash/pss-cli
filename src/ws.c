@@ -15,11 +15,13 @@ struct lws_protocols psscli_protocols_[] = {
 	{ NULL, NULL, 0, 0}
 };
 
-int psscli_ws_write_(struct lws *ws, char *buf, int buflen, enum lws_write_protocol wp);
-int psscli_ws_json_(char *json_string, int json_string_len, psscli_cmd *cmd);
+// internal functions
+static int psscli_ws_write_(struct lws *ws, char *buf, int buflen, enum lws_write_protocol wp);
+static int psscli_ws_json_(char *json_string, int json_string_len, psscli_cmd *cmd);
 
 json_object *j_version;
 
+// set up websocket and ipc
 int psscli_ws_init(psscli_ws_callback callback, const char *version) {
 	psscli_protocols_[0].callback = (void*)callback;
 	memset(&(psscli_ws.wci), 0, sizeof(psscli_ws.wci));
@@ -44,7 +46,7 @@ int psscli_ws_init(psscli_ws_callback callback, const char *version) {
 	psscli_ws.wi.pwsi = &(psscli_ws.w);
 	psscli_ws.wi.ietf_version_or_minus_one = -1;
 
-	// use pipe to insert into the send queue between command unix socket and websocket
+	// we use pipe to insert into the send queue between command unix socket and websocket
 	if (pipe(psscli_ws.notify) < 0) {
 		return 1;
 	}
@@ -57,8 +59,11 @@ int psscli_ws_init(psscli_ws_callback callback, const char *version) {
 	return 0;
 }
 
-// connects to websocket on swarm (pss) node
-// polls for servicing the websocket and reads from command unix socket pipe every turn
+/***
+ * \short connects to websocket on swarm (pss) node
+ * \description polls for servicing the websocket and reads from command unix socket pipe every turn
+ * \todo retry loop on connect fail
+ */ 
 void *psscli_ws_connect(void *v) {
 	char n;
 	lws_client_connect_via_info(&psscli_ws.wi);
@@ -77,6 +82,11 @@ void psscli_ws_free() {
 	}
 }
 
+/***
+ * \short send command on websocket
+ * \description converts command structure to json rpc and sends to websocket. Called from callback when websocket is writable
+ * \todo fail handling
+ */
 int psscli_ws_send(psscli_cmd *cmd) {
 	char in_buf[1024];
 	int r;
@@ -106,6 +116,7 @@ int psscli_ws_write_(struct lws *ws, char *buf, int buflen, enum lws_write_proto
 	return r;
 }
 
+// create json rpc string from cmd 
 int psscli_ws_json_(char *json_string, int json_string_len, psscli_cmd *cmd) {
 	json_object *j;
 	json_object *jp;
@@ -131,11 +142,13 @@ int psscli_ws_json_(char *json_string, int json_string_len, psscli_cmd *cmd) {
 			json_object_array_add(jp, jv);
 			jv = json_object_new_string(*(cmd->values+1));
 			json_object_array_add(jp, jv);
-			jv = json_object_new_string("0x");
+			if ((cmd->values+2) != NULL) {
+				jv = json_object_new_string(*(cmd->values+2));
+			} else {
+				jv = json_object_new_string("0x");
+			}
 			json_object_array_add(jp, jv);
-			free(*(cmd->values+1));
-			free(*(cmd->values));
-			free(cmd->values);
+			psscli_cmd_free(cmd);
 			break;
 		default: 
 			return 1;

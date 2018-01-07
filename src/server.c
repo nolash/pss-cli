@@ -14,6 +14,7 @@
 #include "server.h"
 #include "ws.h"
 #include "error.h"
+#include "std.h"
 
 extern struct psscli_ws_ psscli_ws;
 char psscli_cmd_queue_next_;
@@ -26,12 +27,14 @@ struct sigaction sa_parent;
 
 /***
  * \todo add lws_rx_flow_control() if response queue is full
+ * \todo handle send failure with timeout and possible notify
  */
 int psscli_server_cb(struct lws *wsi, enum lws_callback_reasons reason, void *user, void *in, size_t len) {
 	int n;
 	switch (reason) {
 		case LWS_CALLBACK_CLIENT_WRITEABLE:
 			//printf("read (%d) %d -> %d, %p / %p\n", pthread_self(), psscli_cmd_queue_next_, psscli_cmd_queue_last_, &psscli_cmd_queue_next_, &psscli_cmd_queue_last_);
+			// send all commands in the queue
 			while (psscli_cmd_queue_next_ != psscli_cmd_queue_last_) {
 				psscli_cmd_queue_next_++;
 				psscli_cmd_queue_next_ %= PSSCLI_SERVER_CMD_QUEUE_MAX;
@@ -47,7 +50,6 @@ int psscli_server_cb(struct lws *wsi, enum lws_callback_reasons reason, void *us
 		case LWS_CALLBACK_CLIENT_CONNECTION_ERROR:
 			lwsl_notice("err %d (thread %d)\n", reason, pthread_self());
 			psscli_ws.pid = 0;
-			//raise(SIGINT);
 			break;
 		case LWS_CALLBACK_GET_THREAD_ID:
 			lwsl_notice("pthread %d\n", pthread_self());
@@ -58,9 +60,14 @@ int psscli_server_cb(struct lws *wsi, enum lws_callback_reasons reason, void *us
 			psscli_response *res = &psscli_response_queue_[psscli_response_queue_last_];
 			strcpy(res->content + res->length, in);
 			res->length += len;
+
+			// rpc json terminates at newline, if we have it we can dispatch to handler 
 			if (*(char*)(in+len-1) == 0x0a) {
+				// null-terminate response string
 				*(res->content + res->length - 1) = 0;
+				// tell handler this response can be operated on
 				res->done = 1;
+				// initialize next response object in queue so the handler knows where to stop
 				psscli_response_queue_last_++;
 				psscli_response_queue_last_ %= PSSCLI_SERVER_RESPONSE_QUEUE_MAX;
 				psscli_response_queue_[psscli_response_queue_last_].length = 0;
@@ -74,17 +81,6 @@ int psscli_server_cb(struct lws *wsi, enum lws_callback_reasons reason, void *us
 	return 0;
 }
 
-void psscli_cmd_free(psscli_cmd *cmd) {
-	int i;
-
-	if (cmd->values != NULL)  {
-		for (i = 0; i < cmd->valuecount; i++) {
-			free(cmd->values+i);
-		}
-		free(cmd->values);
-	}
-	memset(&cmd, 0, sizeof(psscli_cmd));
-}
 
 void psscli_server_sigint_(int s) {
 	close(s);
@@ -103,7 +99,7 @@ int psscli_server_load_queue() {
 
 /***
  *
- * fork accept
+ * \todo issue warning if queue is full
  *
  */
 int psscli_server_start() {
@@ -139,58 +135,113 @@ int psscli_server_start() {
 
 	while (psscli_ws.pid) {
 		int n;
+		short *sl[4];
 		psscli_cmd *cmd;
 
 		l = sizeof(struct sockaddr_un);
 		s2 = accept(s, (struct sockaddr*)&sr, &l);
 
 		while (l = recv(s2, &buf, 1, 0) > 0) {
-			char t;
+			char ok;
 			int m;
 
+			ok = (unsigned char)PSSCLI_EOK;
+
+			// next in queue
 			n = psscli_cmd_queue_last_ + 1;
 			n %= PSSCLI_SERVER_CMD_QUEUE_MAX;
+
+			// noop if queue is full
 			if (n == psscli_cmd_queue_next_) {
 				continue;
 			}
 			psscli_cmd_queue_last_ = n;
-			
+	
+			// retrieve the command and decide action	
 			cmd = &psscli_cmd_queue_[psscli_cmd_queue_last_];
 			psscli_cmd_free(cmd);
 			cmd->code = *((unsigned char*)&buf);
 
 			printf("write (%d) %d -> %d, %p / %p\n", pthread_self(), psscli_cmd_queue_next_, psscli_cmd_queue_last_, &psscli_cmd_queue_next_, &psscli_cmd_queue_last_);
+
 			switch (cmd->code) {
 				case PSSCLI_CMD_BASEADDR:
 					l = write(psscli_ws.notify[1], &buf, 1);
 					if (l < 0) {
 						raise(SIGINT);
 					}
+					send(s2, &ok, 1, 0);
 					break;
 				case PSSCLI_CMD_GETPUBLICKEY:
 					l = write(psscli_ws.notify[1], &buf, 1);
 					if (l < 0) {
 						raise(SIGINT);
 					}
+					send(s2, &ok, 1, 0);
 					break;
 				case PSSCLI_CMD_SETPEERPUBLICKEY:
-					l = recv(s2, &buf, 138, MSG_DONTWAIT);
-					if (l < 138) {
+					// keylen+key 132 bytes + topiclen+topic 10 bytes + addrlen 2 bytes = 144 bytes
+					l = recv(s2, &buf, 144, MSG_DONTWAIT);
+
+					// all fields have length prefixes. Get each one
+					sl[0] = (short*)&buf;
+					if (!is_le()) {
+						int16_rev(sl[0]);
+					}
+					sl[1] = (short*)&buf[2+(*sl[0])];
+					if (!is_le()) {
+						int16_rev(sl[1]);
+					}
+					sl[2] = (short*)&buf[4+(*sl[0])+(*sl[1])];
+					if (!is_le()) {
+						int16_rev(sl[2]);
+					}
+
+					// check that we have enough data for required fields
+					if (l < 144 || *sl[0] != 130 || *sl[1] != 8) {
 						memset(&buf, (char)PSSCLI_EINVAL, 1);
 						errno = EPROTO;
 						send(s2, &buf, 1, 0);
 						continue;
 					}
-					psscli_cmd_queue_[psscli_cmd_queue_last_].values = malloc(sizeof(char*)*3);
-					*psscli_cmd_queue_[psscli_cmd_queue_last_].values = malloc(sizeof(char)*133);
-					strcpy(*psscli_cmd_queue_[psscli_cmd_queue_last_].values, "0x");
-					memcpy(*psscli_cmd_queue_[psscli_cmd_queue_last_].values+2, &buf, 132);
-					memset(*(psscli_cmd_queue_[psscli_cmd_queue_last_].values)+132, 0, 1);
-					*(psscli_cmd_queue_[psscli_cmd_queue_last_].values+1) = malloc(sizeof(char)*11);
-					strcpy(*(psscli_cmd_queue_[psscli_cmd_queue_last_].values+1), "0x");
-					memcpy(*(psscli_cmd_queue_[psscli_cmd_queue_last_].values+1)+2, &buf[130], 8);
+					
+					// allocate three vars for this command
+					if (psscli_cmd_alloc(cmd, 3) == NULL) {
+						memset(&buf, (char)PSSCLI_EMEM, 1);
+						errno = ENOMEM;
+						send(s2, &buf, 1, 0);
+						continue;
+					}
+
+					// allocate and set publickey
+					*cmd->values = malloc(sizeof(char)*(*sl[0])+3);
+					strcpy(*cmd->values, "0x");
+					memcpy(*cmd->values+2, &buf[2], *sl[0]);
+					memset(*cmd->values+2+(*sl[0]), 0, 1);
+
+					// allocate and set topic
+					*(cmd->values+1) = malloc(sizeof(char)*(*sl[1])+3);
+					strcpy(*(cmd->values+1), "0x");
+					memcpy(*(cmd->values+1)+2, &buf[4+(*sl[0])], *sl[1]);
+					memset(*(cmd->values+1)+2+(*sl[1]), 0, 1);
+
+					// if optional address is present, allocate, retrieve and set it
+					if (*sl[2] > 0) {
+						l = recv(s2, &buf, *sl[2], MSG_DONTWAIT);
+						*(cmd->values+2) = malloc(sizeof(char)*(*sl[2])+3);
+						strcpy(*(cmd->values+2), "0x");
+						memcpy(*(cmd->values+2)+2, &buf, *sl[2]);
+						memset(*(cmd->values+2)+2+(*sl[2]), 0, 1);
+					}
+
+					// tell the outgoing queue handler about the new pending command
+					buf[0] = (unsigned char)PSSCLI_CMD_SETPEERPUBLICKEY;
 					l = write(psscli_ws.notify[1], &buf, 1);
+
+					// tell the client all is well
+					send(s2, &ok, 1, 0);
 					break;
+
 				default:
 					printf("foo\n");
 					psscli_cmd_queue_last_--;

@@ -22,4 +22,7 @@ typedef struct psscli_response_ {
 	int length;
 } psscli_response;
 
+psscli_cmd* psscli_cmd_alloc(psscli_cmd *cmd, int valuecount);
+void psscli_cmd_free(psscli_cmd *cmd);
+
 #endif // PSSCLI_CMD_H_
