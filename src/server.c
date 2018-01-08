@@ -49,7 +49,12 @@ int psscli_server_cb(struct lws *wsi, enum lws_callback_reasons reason, void *us
 			break;
 		case LWS_CALLBACK_CLIENT_CONNECTION_ERROR:
 			lwsl_notice("err %d (thread %d)\n", reason, pthread_self());
-			psscli_ws.pid = 0;
+			raise(SIGHUP);
+			break;
+		case LWS_CALLBACK_CLOSED:
+			if (psscli_ws.pid > 0) {
+				raise(SIGHUP);
+			}
 			break;
 		case LWS_CALLBACK_GET_THREAD_ID:
 			lwsl_notice("pthread %d\n", pthread_self());

@@ -4,6 +4,8 @@
 #include <fcntl.h>
 #include <json-c/json.h>
 #include <stdlib.h>
+#include <signal.h>
+#include <stdio.h>
 
 #include "cmd.h"
 #include "ws.h"
@@ -21,8 +23,21 @@ static int psscli_ws_json_(char *json_string, int json_string_len, psscli_cmd *c
 
 json_object *j_version;
 
+void psscli_ws_connect_try_(int s);
+
+void psscli_ws_connect_try_(int s) {
+	psscli_ws.connected = 0;
+	lws_client_connect_via_info(&psscli_ws.wi);
+	if (s > 0) {
+		sleep(1);
+	}
+	printf("return\n");
+}
+
 // set up websocket and ipc
 int psscli_ws_init(psscli_ws_callback callback, const char *version) {
+	struct sigaction sa;
+
 	psscli_protocols_[0].callback = (void*)callback;
 	memset(&(psscli_ws.wci), 0, sizeof(psscli_ws.wci));
 	psscli_ws.wci.uid = -1;
@@ -56,6 +71,11 @@ int psscli_ws_init(psscli_ws_callback callback, const char *version) {
 
 	j_version = json_object_new_string(version);
 
+	sa.sa_handler = psscli_ws_connect_try_;
+	sa.sa_flags = 0;
+	sigemptyset(&sa.sa_mask);
+	sigaction(SIGHUP, &sa, NULL);
+
 	return 0;
 }
 
@@ -66,12 +86,15 @@ int psscli_ws_init(psscli_ws_callback callback, const char *version) {
  */ 
 void *psscli_ws_connect(void *v) {
 	char n;
-	lws_client_connect_via_info(&psscli_ws.wi);
+	//lws_client_connect_via_info(&psscli_ws.wi);
+	psscli_ws_connect_try_(0);
 	while (psscli_ws.pid) {
 		printf("poll\n");
 		lws_service(psscli_ws.ctx, PSSCLI_WS_LOOP_TIMEOUT);
-		if (read(psscli_ws.notify[0], &n, 1) > 0) {
-			lws_callback_on_writable(psscli_ws.w);
+		if (psscli_ws.connected) {
+			if (read(psscli_ws.notify[0], &n, 1) > 0) {
+				lws_callback_on_writable(psscli_ws.w);
+			}
 		}
 	}
 }

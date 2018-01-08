@@ -157,12 +157,29 @@ int main() {
 	// should return 0
 	l = recv(s, &c, 1, 0);
 	printf("got: %x %d\n", *(unsigned char*)&c, l);
-	close(s);
 
 	// poll for response
 	while (psscli_server_shift(&res)) {
 		nanosleep(&ts, NULL);
 	}
+
+	while (1) {
+		// this method has no params
+		c[0] = PSSCLI_CMD_BASEADDR;
+		if (send(s, &c, 1, 0) == -1) {
+			return 4;
+		}
+		
+		// should return 0
+		l = recv(s, &c, 1, 0);
+
+		// poll for response	
+		while (psscli_server_shift(&res)) {
+			nanosleep(&ts, NULL);
+		}
+		sleep(1);
+	}
+	close(s);
 
 	// responses received, shutdown
 	raise(SIGINT);
