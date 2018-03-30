@@ -10,7 +10,6 @@
 #include "cmd.h"
 #include "ws.h"
 
-char *psscli_server_socket_path();
 int psscli_server_start();
 int psscli_server_shift(psscli_response *r);
 

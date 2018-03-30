@@ -15,7 +15,9 @@
 #include "ws.h"
 #include "error.h"
 #include "std.h"
+#include "config.h"
 
+extern struct psscli_config conf;
 extern struct psscli_ws_ psscli_ws;
 char psscli_cmd_queue_next_;
 char psscli_cmd_queue_last_;
@@ -31,6 +33,8 @@ struct sigaction sa_parent;
  */
 int psscli_server_cb(struct lws *wsi, enum lws_callback_reasons reason, void *user, void *in, size_t len) {
 	int n;
+	char *t;
+
 	switch (reason) {
 		case LWS_CALLBACK_CLIENT_WRITEABLE:
 			//printf("read (%d) %d -> %d, %p / %p\n", pthread_self(), psscli_cmd_queue_next_, psscli_cmd_queue_last_, &psscli_cmd_queue_next_, &psscli_cmd_queue_last_);
@@ -67,9 +71,28 @@ int psscli_server_cb(struct lws *wsi, enum lws_callback_reasons reason, void *us
 			res->length += len;
 
 			// rpc json terminates at newline, if we have it we can dispatch to handler 
-			if (*(char*)(in+len-1) == 0x0a) {
+			t = in;
+			while (1) {
+				t = strchr(t, 0x7b);
+				if (t == 0x0) {
+					break;
+				}
+				t++;
+				res->id++;
+			}
+			t = in;
+			while (1) {
+				t = strchr(t, 0x7d);
+				if (t == 0x0) {
+					break;
+				}
+				t++;
+				res->id--;
+			}
+			if (!res->id) {
+			//if (*(char*)(in+len-1) == 0x0a) {
 				// null-terminate response string
-				*(res->content + res->length - 1) = 0;
+				*(res->content + res->length) = 0;
 				// tell handler this response can be operated on
 				res->done = 1;
 				// initialize next response object in queue so the handler knows where to stop
@@ -77,7 +100,7 @@ int psscli_server_cb(struct lws *wsi, enum lws_callback_reasons reason, void *us
 				psscli_response_queue_last_ %= PSSCLI_SERVER_RESPONSE_QUEUE_MAX;
 				psscli_response_queue_[psscli_response_queue_last_].length = 0;
 				psscli_response_queue_[psscli_response_queue_last_].done = 0;
-				lwsl_notice("recv done: %s\n", res->content);
+				lwsl_notice("recv done (last: %d\tnext: %d): %s\n", psscli_response_queue_last_, psscli_response_queue_next_, res->content);
 			}
 			break;
 		default:
@@ -121,14 +144,14 @@ int psscli_server_start() {
 	sigemptyset(&sa.sa_mask);
 	sigaction(SIGINT, &sa, &sa_parent);
 
-	if (!stat(PSSCLI_SERVER_SOCKET_PATH, &fstat)) {
-		unlink(PSSCLI_SERVER_SOCKET_PATH);
+	if (!stat(conf.sock, &fstat)) {
+		unlink(conf.sock);
 		//return 1;
 	}
 	s = socket(AF_UNIX, SOCK_STREAM, 0);
 
 	sl.sun_family = AF_UNIX;
-	strcpy(sl.sun_path, PSSCLI_SERVER_SOCKET_PATH);
+	strcpy(sl.sun_path, conf.sock);
 	l = strlen(sl.sun_path) + sizeof(sl.sun_family);
 	if (bind(s, (struct sockaddr*)&sl, l)) {
 		return 1;
@@ -147,10 +170,8 @@ int psscli_server_start() {
 		s2 = accept(s, (struct sockaddr*)&sr, &l);
 
 		while (l = recv(s2, &buf, 1, 0) > 0) {
-			char ok;
 			int m;
-
-			ok = (unsigned char)PSSCLI_EOK;
+			char *p;
 
 			// next in queue
 			n = psscli_cmd_queue_last_ + 1;
@@ -158,31 +179,39 @@ int psscli_server_start() {
 
 			// noop if queue is full
 			if (n == psscli_cmd_queue_next_) {
+				n = (unsigned char)PSSCLI_EFULL;
+				send(s2, &n, 1, 0); // -1 = queue full
 				continue;
 			}
 			psscli_cmd_queue_last_ = n;
+			n *= -1;
 	
 			// retrieve the command and decide action	
 			cmd = &psscli_cmd_queue_[psscli_cmd_queue_last_];
 			psscli_cmd_free(cmd);
-			cmd->code = *((unsigned char*)&buf);
+
+			p = (unsigned char*)&buf;
+			cmd->code = *p;
+			cmd->id = *(p+1);
 
 			printf("write (%d) %d -> %d, %p / %p\n", pthread_self(), psscli_cmd_queue_next_, psscli_cmd_queue_last_, &psscli_cmd_queue_next_, &psscli_cmd_queue_last_);
 
 			switch (cmd->code) {
 				case PSSCLI_CMD_BASEADDR:
-					l = write(psscli_ws.notify[1], &buf, 1);
+					buf[1] = n;
+					l = write(psscli_ws.notify[1], &buf, 2);
 					if (l < 0) {
 						raise(SIGINT);
 					}
-					send(s2, &ok, 1, 0);
+					send(s2, &n, 1, 0);
 					break;
 				case PSSCLI_CMD_GETPUBLICKEY:
-					l = write(psscli_ws.notify[1], &buf, 1);
+					buf[1] = n;
+					l = write(psscli_ws.notify[1], &buf, 2);
 					if (l < 0) {
 						raise(SIGINT);
 					}
-					send(s2, &ok, 1, 0);
+					send(s2, &n, 1, 0);
 					break;
 				case PSSCLI_CMD_SETPEERPUBLICKEY:
 					// keylen+key 132 bytes + topiclen+topic 10 bytes + addrlen 2 bytes = 144 bytes
@@ -244,7 +273,7 @@ int psscli_server_start() {
 					l = write(psscli_ws.notify[1], &buf, 1);
 
 					// tell the client all is well
-					send(s2, &ok, 1, 0);
+					send(s2, &n, 1, 0);
 					break;
 
 				default:
@@ -259,11 +288,11 @@ int psscli_server_start() {
 
 }
 
-char* psscli_server_socket_path() {
-	return PSSCLI_SERVER_SOCKET_PATH;
-}
-
+/***
+ * \todo shared memory for response queue cursors
+ */	
 int psscli_server_shift(psscli_response *r) {
+	printf("checking shift\tlast: %d\tnext: %d\n", psscli_response_queue_last_, psscli_response_queue_next_);
 	if (psscli_response_queue_last_ == psscli_response_queue_next_) {
 		return 1;
 	}

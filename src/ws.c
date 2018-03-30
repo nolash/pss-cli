@@ -85,14 +85,14 @@ int psscli_ws_init(psscli_ws_callback callback, const char *version) {
  * \todo retry loop on connect fail
  */ 
 void *psscli_ws_connect() {
-	char n;
+	char n[2];
 	//lws_client_connect_via_info(&psscli_ws.wi);
 	psscli_ws_connect_try_(0);
 	while (psscli_ws.pid) {
 		printf("poll\n");
 		lws_service(psscli_ws.ctx, PSSCLI_WS_LOOP_TIMEOUT);
 		if (psscli_ws.connected) {
-			if (read(psscli_ws.notify[0], &n, 1) > 0) {
+			if (read(psscli_ws.notify[0], &n, 2) > 0) {
 				lws_callback_on_writable(psscli_ws.w);
 			}
 		}

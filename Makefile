@@ -34,7 +34,7 @@ tools: obj
 	gcc -g3 ${INCLUDE} -o ${BUILDDIR}/pssd ${BUILDDIR}/pssd.o ${BUILDDIR}/config.o ${BUILDDIR}/ws.o ${BUILDDIR}/server.o ${BUILDDIR}/std.o ${BUILDDIR}/cmd.o -lwebsockets -lpthread -ljson-c
 
 	gcc -g3 ${INCLUDE} -o ${BUILDDIR}/pss-addr.o -c ${TOOLSDIR}/baseaddr.c
-	gcc -g3 ${INCLUDE} -o ${BUILDDIR}/pss-addr ${BUILDDIR}/pss-addr.o ${BUILDDIR}/config.o
+	gcc -g3 ${INCLUDE} -o ${BUILDDIR}/pss-addr ${BUILDDIR}/pss-addr.o ${BUILDDIR}/config.o ${BUILDDIR}/server.o ${BUILDDIR}/ws.o ${BUILDDIR}/cmd.o ${BUILDDIR}/std.o -lwebsockets -ljson-c
 
 
 .PHONY: clean

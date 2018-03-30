@@ -90,7 +90,7 @@ int main() {
 		return 3;
 	}
 	rs.sun_family = AF_UNIX;
-	strcpy(rs.sun_path, psscli_server_socket_path());
+	strcpy(rs.sun_path, PSSCLI_SERVER_SOCKET_PATH);
 	l = strlen(rs.sun_path) + sizeof(rs.sun_family);
 	if (connect(s, (struct sockaddr *)&rs, l) == -1) {
 		return 3;

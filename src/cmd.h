@@ -12,11 +12,13 @@ enum psscli_cmd_code {
 
 typedef struct psscli_cmd_ {
 	enum psscli_cmd_code code;
+	char id;
 	char **values;
 	unsigned char valuecount;
 } psscli_cmd;
 
 typedef struct psscli_response_ {
+	char id;
 	char done;
 	char content[PSSCLI_CMD_RESPONSE_MAX]; 
 	int length;
