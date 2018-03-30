@@ -6,15 +6,17 @@
 static volatile int force_exit;
 int in_buf_crsr;
 char in_buf[2048 + LWS_PRE];
+int in_depth = 0;
 int sent = 0;
 
 int callback_proto(struct lws *wsi, enum lws_callback_reasons reason, void *user, void *in, size_t len) {
 	int n;
 	char s[2048];
+	char *t;
 	json_tokener *jt;
 	json_object *jo;
 	json_object *jv; 
-	json_bool *jr;
+	json_bool jr;
 
 	switch (reason) {
 		case LWS_CALLBACK_WSI_CREATE:
@@ -47,13 +49,31 @@ int callback_proto(struct lws *wsi, enum lws_callback_reasons reason, void *user
 		case LWS_CALLBACK_CLIENT_RECEIVE:
 			strcpy(in_buf + in_buf_crsr, in);
 			in_buf_crsr += len;
-			sprintf(s, "got data\n");
-			if (*(char*)(in+len-1) == 0x0a) {
-				*(in_buf + in_buf_crsr - 1) = 0;
+			sprintf(s, "got data (%d): %s\n", strlen(in), in);
+			t = in;
+			while (1) {
+				t = strchr(t, 0x7b);
+				if (t == 0x0) {
+					break;
+				}
+				t++;
+				in_depth++;
+			}
+			t = in;
+			while (1) {
+				t = strchr(t, 0x7d);
+				if (t == 0x0) {
+					break;
+				}
+				t++;
+				in_depth--;
+			}
+			if (!in_depth) {
+				*(in_buf + in_buf_crsr) = 0;
 				jt = json_tokener_new();
-				jo = json_tokener_parse_ex(jt, in_buf, in_buf_crsr-1);
+				jo = json_tokener_parse_ex(jt, in_buf, in_buf_crsr);
 				jr = json_object_object_get_ex(jo, "result", &jv);
-				sprintf(s, "result: %s\n", json_object_get_string(jv));
+				sprintf(s, "result (%d): %s\n", (int)jr, json_object_get_string(jv));
 				json_tokener_free(jt);
 				force_exit = 1;
 			}
@@ -94,9 +114,9 @@ int main() {
 		return 1;
 	}
 	wi.context = context;
-	wi.address = "localhost";
+	wi.address = "192.168.0.42";
 	wi.port = 8546;
-	wi.host = "localhost";
+	wi.host = "192.168.0.42";
 	wi.origin = "localhost";
 	wi.protocol = protocols[0].name;
 	wi.ssl_connection = 0;

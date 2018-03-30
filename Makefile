@@ -1,19 +1,25 @@
 SRCDIR=src
 BUILDDIR=build
 TESTDIR=test
+TOOLSDIR=tools
 INCLUDE=-I./src
 
 obj:
-	gcc -g3 ${INCLUDE} -o ${BUILDDIR}/psscli.o -c ${SRCDIR}/psscli.c 
-	gcc -g3 ${INCLUDE} -o ${BUILDDIR}/util.o -c ${SRCDIR}/util.c 
-	gcc -g3 ${INCLUDE} -o ${BUILDDIR}/ws.o -c ${SRCDIR}/ws.c
-	gcc -g3 ${INCLUDE} -o ${BUILDDIR}/server.o -c ${SRCDIR}/server.c
-	gcc -g3 ${INCLUDE} -o ${BUILDDIR}/std.o -c ${SRCDIR}/std.c
-	gcc -g3 ${INCLUDE} -o ${BUILDDIR}/cmd.o -c ${SRCDIR}/cmd.c
+	gcc -g3 ${INCLUDE} -c ${SRCDIR}/psscli.c -o ${BUILDDIR}/psscli.o 
+	gcc -g3 ${INCLUDE} -c ${SRCDIR}/config.c -o ${BUILDDIR}/config.o 
+	gcc -g3 ${INCLUDE} -c ${SRCDIR}/util.c -o ${BUILDDIR}/util.o 
+	gcc -g3 ${INCLUDE} -c ${SRCDIR}/ws.c -o ${BUILDDIR}/ws.o
+	gcc -g3 ${INCLUDE} -c ${SRCDIR}/server.c -o ${BUILDDIR}/server.o
+	gcc -g3 ${INCLUDE} -c ${SRCDIR}/std.c -o ${BUILDDIR}/std.o
+	gcc -g3 ${INCLUDE} -c ${SRCDIR}/cmd.c -o ${BUILDDIR}/cmd.o
 
 test-connect: obj
 	gcc -g3 ${INCLUDE} -o ${BUILDDIR}/connect.o -c ${TESTDIR}/connect.c
-	gcc -g3 ${INCLUDE} -o ${BUILDDIR}/test_connect ${BUILDDIR}/connect.o ${BUILDDIR}/ws.o -lwebsockets
+	gcc -g3 ${INCLUDE} -o ${BUILDDIR}/test_connect ${BUILDDIR}/connect.o ${BUILDDIR}/ws.o ${BUILDDIR}/cmd.o -lwebsockets -ljson-c
+
+test-baseaddr: obj
+	gcc -g3 ${INCLUDE} -o ${BUILDDIR}/baseaddr.o -c ${TESTDIR}/baseaddr.c
+	gcc -g3 ${INCLUDE} -o ${BUILDDIR}/test_baseaddr ${BUILDDIR}/baseaddr.o ${BUILDDIR}/ws.o ${BUILDDIR}/cmd.o -lwebsockets -ljson-c
 
 test-loadpeers: obj
 	gcc -g3 ${INCLUDE} -o ${BUILDDIR}/loadpeers.o -c ${TESTDIR}/loadpeers.c
@@ -23,5 +29,14 @@ test-server: obj
 	gcc -g3 ${INCLUDE} -o ${BUILDDIR}/test_server.o -c ${TESTDIR}/server.c
 	gcc -g3 ${INCLUDE} -o ${BUILDDIR}/test_server ${BUILDDIR}/test_server.o ${BUILDDIR}/server.o ${BUILDDIR}/std.o ${BUILDDIR}/cmd.o ${BUILDDIR}/ws.o -lwebsockets -lpthread -ljson-c
 
+tools: obj
+	gcc -g3 ${INCLUDE} -o ${BUILDDIR}/pssd.o -c ${TOOLSDIR}/pssd.c
+	gcc -g3 ${INCLUDE} -o ${BUILDDIR}/pssd ${BUILDDIR}/pssd.o ${BUILDDIR}/config.o ${BUILDDIR}/ws.o ${BUILDDIR}/server.o ${BUILDDIR}/std.o ${BUILDDIR}/cmd.o -lwebsockets -lpthread -ljson-c
+
+	gcc -g3 ${INCLUDE} -o ${BUILDDIR}/pss-addr.o -c ${TOOLSDIR}/baseaddr.c
+	gcc -g3 ${INCLUDE} -o ${BUILDDIR}/pss-addr ${BUILDDIR}/pss-addr.o ${BUILDDIR}/config.o
+
+
+.PHONY: clean
 clean:
 	rm -rf ${BUILDDIR}/*

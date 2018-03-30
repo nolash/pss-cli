@@ -15,6 +15,7 @@ typedef struct psscli_peer_ {
 	psscli_key key;
 	psscli_address address;
 	char *nick;
+	char *pet;
 } psscli_peer;
 
 typedef struct psscli_ {

@@ -7,6 +7,7 @@ enum psscli_error {
 	PSSCLI_ENOINIT,
 	PSSCLI_EFULL,
 	PSSCLI_EINVAL,
+	PSSCLI_ENODATA,
 };
 
 #endif // PSSCLI_ERROR_H_

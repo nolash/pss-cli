@@ -31,15 +31,22 @@ int psscli_peers_load(psscli *c, const char *path) {
 		const char *key;
 		const char *addr;
 		const char *nick;
+		const char *pet;
 		array_list *a;
+		unsigned int peeridx;
+		psscli_peer peer;
 
 		a = json_object_get_array(array_list_get_idx(ja, i));
 
 		key = json_object_get_string(array_list_get_idx(a, 0));
 		addr = json_object_get_string(array_list_get_idx(a, 1));
 		nick = json_object_get_string(array_list_get_idx(a, 2));
+		pet = json_object_get_string(array_list_get_idx(a, 3));
 
-		psscli_add_peer(c, key, addr, nick);
+		psscli_add_peer(c, key, &peeridx);
+		psscli_peer_set(c, peeridx, PSSCLI_CLI_SETPEER_ADDRESS, (void*)addr);
+		psscli_peer_set(c, peeridx, PSSCLI_CLI_SETPEER_NICK, (void*)nick);
+		psscli_peer_set(c, peeridx, PSSCLI_CLI_SETPEER_PET, (void*)pet);
 	}
 
 	return 0;

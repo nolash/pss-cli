@@ -84,7 +84,7 @@ int psscli_ws_init(psscli_ws_callback callback, const char *version) {
  * \description polls for servicing the websocket and reads from command unix socket pipe every turn
  * \todo retry loop on connect fail
  */ 
-void *psscli_ws_connect(void *v) {
+void *psscli_ws_connect() {
 	char n;
 	//lws_client_connect_via_info(&psscli_ws.wi);
 	psscli_ws_connect_try_(0);

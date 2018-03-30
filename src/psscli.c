@@ -35,7 +35,7 @@ int psscli_check_peer_capacity(psscli *c) {
 	return 0;
 }
 
-enum psscli_error psscli_add_peer(psscli *c, const char *key, const char *addr, const char *nick) {
+enum psscli_error psscli_add_peer(psscli *c, const char *key, unsigned int *idx) {
 	psscli_peer *peer;
 
 	if (c == NULL) {
@@ -48,9 +48,9 @@ enum psscli_error psscli_add_peer(psscli *c, const char *key, const char *addr, 
 
 	peer = c->peers + c->peer_count;
 	memset(peer, 0, sizeof(psscli_peer));
-	if (nick != NULL) {
-		if (strcmp(nick, "")) {
-			peer->nick = malloc(sizeof(char) * strlen(nick));
+	if (key != NULL) {
+		if (strcmp(key, "")) {
+			peer->nick = malloc(sizeof(char) * strlen(key));
 			if (peer->nick == NULL) {
 				return PSSCLI_EMEM;
 			}
@@ -58,17 +58,39 @@ enum psscli_error psscli_add_peer(psscli *c, const char *key, const char *addr, 
 	}
 
 	strcpy(peer->key, key);
-	if (addr != NULL) {
-		strcpy(peer->address, addr);
-	} else {
-		strcpy(peer->address, PSSCLI_ADDRESS_NONE);
-	}
-	if (peer->nick != NULL) {
-		strcpy(peer->nick, nick);
-	} 
-
+	*idx = c->peer_count;
 	c->peer_count++;
 
+	return PSSCLI_EOK;
+}
+
+enum psscli_error psscli_peer_set(psscli *c, unsigned int idx, char item, void *value) {
+	psscli_peer *peer;
+
+	peer = c->peers + idx;
+
+	if (peer == NULL) {
+		return PSSCLI_ENODATA;
+	}
+
+	switch (item) {
+		case PSSCLI_CLI_SETPEER_ADDRESS:
+			if (value != NULL) {
+				strcpy(peer->address, (char*)value);
+			} else {
+				strcpy(peer->address, PSSCLI_ADDRESS_NONE);
+			}
+			break;
+		case PSSCLI_CLI_SETPEER_NICK:
+			strcpy(peer->nick, (char*)value);
+			break;
+		case PSSCLI_CLI_SETPEER_PET:
+			strcpy(peer->pet, (char*)value);
+			break;
+		default:
+			return PSSCLI_EINVAL;
+
+	}
 	return PSSCLI_EOK;
 }
 

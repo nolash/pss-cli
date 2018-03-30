@@ -11,7 +11,7 @@ int main() {
 	if (c == 0x0) {
 		return 2;
 	}
-	e = psscli_peers_load(c, "test");
+	e = psscli_peers_load(c, "testpeers");
 	if (e < 0) {
 		return 1;
 	}
