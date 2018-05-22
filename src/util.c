@@ -8,6 +8,10 @@
 /***
  *
  * \short load peers from file
+ *
+ * \param c psscli object
+ * \param path full path to json file to load peers from
+ * \return negative value on failure, 0 on success
  */
 int psscli_peers_load(psscli *c, const char *path) {
 	json_object *jo;
@@ -44,9 +48,9 @@ int psscli_peers_load(psscli *c, const char *path) {
 		pet = json_object_get_string(array_list_get_idx(a, 3));
 
 		psscli_add_peer(c, key, &peeridx);
-		psscli_peer_set(c, peeridx, PSSCLI_CLI_SETPEER_ADDRESS, (void*)addr);
-		psscli_peer_set(c, peeridx, PSSCLI_CLI_SETPEER_NICK, (void*)nick);
-		psscli_peer_set(c, peeridx, PSSCLI_CLI_SETPEER_PET, (void*)pet);
+		psscli_peer_set(c, peeridx, PSSCLI_PEER_ADDRESS, (void*)addr);
+		psscli_peer_set(c, peeridx, PSSCLI_PEER_NICK, (void*)nick);
+		psscli_peer_set(c, peeridx, PSSCLI_PEER_PET, (void*)pet);
 	}
 
 	return 0;
