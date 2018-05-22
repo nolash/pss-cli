@@ -20,12 +20,12 @@ int main() {
 		return 1;
 	}
 
-
 	value = malloc(sizeof(char)*1024);
 
  	psscli_peer_get(c, 0, PSSCLI_PEER_KEY, (void*)&value);
 	fprintf(stderr, "%s\n", value);
 
+	e = psscli_peers_save(c, "test/tmp");
 	free(value);
 	psscli_free(c);
 	return 0;
