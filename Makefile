@@ -9,9 +9,10 @@ obj:
 	gcc -g3 ${INCLUDE} -c ${SRCDIR}/config.c -o ${BUILDDIR}/config.o 
 	gcc -g3 ${INCLUDE} -c ${SRCDIR}/util.c -o ${BUILDDIR}/util.o 
 	gcc -g3 ${INCLUDE} -c ${SRCDIR}/ws.c -o ${BUILDDIR}/ws.o
-	gcc -g3 ${INCLUDE} -c ${SRCDIR}/server.c -o ${BUILDDIR}/server.o
+	gcc -g3 ${INCLUDE} -c ${SRCDIR}/server.c -o ${BUILDDIR}/server.o 
 	gcc -g3 ${INCLUDE} -c ${SRCDIR}/std.c -o ${BUILDDIR}/std.o
 	gcc -g3 ${INCLUDE} -c ${SRCDIR}/cmd.c -o ${BUILDDIR}/cmd.o
+	gcc -g3 ${INCLUDE} -c ${SRCDIR}/error.c -o ${BUILDDIR}/error.o
 
 test-connect: obj
 	gcc -g3 ${INCLUDE} -o ${BUILDDIR}/connect.o -c ${TESTDIR}/node/connect.c
@@ -31,10 +32,10 @@ test-server: obj
 
 tools: obj
 	gcc -g3 ${INCLUDE} -o ${BUILDDIR}/pssd.o -c ${TOOLSDIR}/pssd.c
-	gcc -g3 ${INCLUDE} -o ${BUILDDIR}/pssd ${BUILDDIR}/pssd.o ${BUILDDIR}/config.o ${BUILDDIR}/ws.o ${BUILDDIR}/server.o ${BUILDDIR}/std.o ${BUILDDIR}/cmd.o -lwebsockets -lpthread -ljson-c
+	gcc -g3 ${INCLUDE} -o ${BUILDDIR}/pssd ${BUILDDIR}/pssd.o ${BUILDDIR}/config.o ${BUILDDIR}/ws.o ${BUILDDIR}/server.o ${BUILDDIR}/std.o ${BUILDDIR}/cmd.o $(BUILDDIR)/error.o -lwebsockets -lpthread -ljson-c
 
 	gcc -g3 ${INCLUDE} -o ${BUILDDIR}/pss-addr.o -c ${TOOLSDIR}/baseaddr.c
-	gcc -g3 ${INCLUDE} -o ${BUILDDIR}/pss-addr ${BUILDDIR}/pss-addr.o ${BUILDDIR}/config.o ${BUILDDIR}/server.o ${BUILDDIR}/ws.o ${BUILDDIR}/cmd.o ${BUILDDIR}/std.o -lwebsockets -ljson-c
+	gcc -g3 ${INCLUDE} -o ${BUILDDIR}/pss-addr ${BUILDDIR}/pss-addr.o ${BUILDDIR}/config.o ${BUILDDIR}/server.o ${BUILDDIR}/ws.o ${BUILDDIR}/cmd.o ${BUILDDIR}/std.o $(BUILDDIR)/error.o -lwebsockets -ljson-c
 
 
 .PHONY: clean

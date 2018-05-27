@@ -20,9 +20,7 @@ struct lws_protocols psscli_protocols_[] = {
 // internal functions
 static int psscli_ws_write_(struct lws *ws, char *buf, int buflen, enum lws_write_protocol wp);
 static int psscli_ws_json_(char *json_string, int json_string_len, psscli_cmd *cmd);
-
 json_object *j_version;
-
 void psscli_ws_connect_try_(int s);
 
 void psscli_ws_connect_try_(int s) {
@@ -31,7 +29,7 @@ void psscli_ws_connect_try_(int s) {
 	if (s > 0) {
 		sleep(1);
 	}
-	printf("return\n");
+	psscli_ws.connected = 1;
 }
 
 // set up websocket and ipc

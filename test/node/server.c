@@ -28,6 +28,7 @@ void croak(int sig) {
 // wrappers for pthread routines
 void* server_start(void *v) {
 	fprintf(stderr, "sockserver thread: %d\n", p1);
+	psscli_server_init(PSSCLI_SERVER_MODE_DAEMON);
 	psscli_server_start(NULL);
 	pthread_exit(NULL);	
 }

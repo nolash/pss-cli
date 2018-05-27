@@ -25,13 +25,18 @@ void croak(int sig) {
 
 // wrappers for pthread routines
 void* server_start(void *v) {
-	fprintf(stderr, "sockserver thread: %d\n", p1);
-	psscli_server_start(NULL);
+	int r;
+
+	fprintf(stderr, "sockserver thread: %d\tws: %p\n", p1, psscli_ws.wci.protocols[0].callback);
+	if (r = psscli_server_start(NULL)) {
+		fprintf(stderr, "failed to start server: %s\n", psscli_get_error_string());
+	}
+	psscli_server_stop();
 	pthread_exit(NULL);	
 }
 
 void* ws_connect(void *v) {
-	fprintf(stderr, "websocket thread: %d\n", p2);
+	fprintf(stderr, "websocket thread: %d\tws: %p\n", p2, psscli_ws.wci.protocols[0].callback);
 	psscli_ws_connect(NULL);
 	pthread_kill(p1, SIGINT);
 	pthread_exit(NULL);
@@ -62,13 +67,7 @@ int main(int argc, char **argv) {
 		return 1;
 	}
 
-	// separate threads for the unix socket server (for piping commands) and websocket
-	r = pthread_create(&p1, NULL, server_start, NULL);
-	if (r) {
-		return 2;
-	}
-	r = pthread_create(&p2, NULL, ws_connect, NULL);
-	if (r) {
+	if (r = psscli_server_init(PSSCLI_SERVER_MODE_DAEMON)) {
 		return 2;
 	}
 
@@ -78,6 +77,16 @@ int main(int argc, char **argv) {
 	sigemptyset(&sa.sa_mask);
 	sigaction(SIGINT, &sa, NULL);
 
+	fprintf(stderr, "starting threads: ws:%p\n", psscli_ws.wci.protocols[0].callback);
+	// separate threads for the unix socket server (for socket commands) and websocket
+	r = pthread_create(&p1, NULL, server_start, NULL);
+	if (r) {
+		return 3;
+	}
+	r = pthread_create(&p2, NULL, ws_connect, NULL);
+	if (r) {
+		return 3;
+	}
 	// timeout for polling read/write ready
 	ts.tv_sec = 0;
 	ts.tv_nsec = 50000000;

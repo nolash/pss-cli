@@ -1,14 +1,16 @@
-#include <sys/socket.h>
-#include <sys/types.h>
-#include <sys/stat.h>
-#include <sys/un.h>
-#include <pthread.h>
-#include <stdio.h>
-#include <fcntl.h>
-
 #include <string.h>
 #include <stdlib.h>
 #include <signal.h>
+#include <stdio.h>
+#include <fcntl.h>
+#include <unistd.h>
+#include <pthread.h>
+#include <sys/socket.h>
+#include <sys/shm.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <sys/ipc.h>
+#include <sys/un.h>
 
 #include "cmd.h"
 #include "server.h"
@@ -17,15 +19,24 @@
 #include "std.h"
 #include "config.h"
 
+static char b[1024];
+
 extern struct psscli_config conf;
 extern struct psscli_ws_ psscli_ws;
-char psscli_cmd_queue_next_;
-char psscli_cmd_queue_last_;
-int psscli_response_queue_next_;
-int psscli_response_queue_last_;
+static char cmd_queue_next;
+static char cmd_queue_last;
+static int response_queue_next;
+static int response_queue_last;
+psscli_cmd *cmd_queue;
+psscli_response *response_queue;
 
 unsigned int s;
 struct sigaction sa_parent;
+
+key_t cmd_queue_shm_key;
+int cmd_queue_shm_id;
+key_t response_queue_shm_key;
+int response_queue_shm_id;
 
 /***
  * \todo add lws_rx_flow_control() if response queue is full
@@ -35,16 +46,17 @@ int psscli_server_cb(struct lws *wsi, enum lws_callback_reasons reason, void *us
 	int n;
 	char *t;
 
+	fprintf(stderr, "ws callback: reason: %d\tws: %p\n", reason, wsi);
 	switch (reason) {
 		case LWS_CALLBACK_CLIENT_WRITEABLE:
-			//printf("read (%d) %d -> %d, %p / %p\n", pthread_self(), psscli_cmd_queue_next_, psscli_cmd_queue_last_, &psscli_cmd_queue_next_, &psscli_cmd_queue_last_);
+			fprintf(stderr, "read (%d) %d -> %d, %p / %p\n", pthread_self(), cmd_queue_next, cmd_queue_last, &cmd_queue_next, &cmd_queue_last);
 			// send all commands in the queue
-			while (psscli_cmd_queue_next_ != psscli_cmd_queue_last_) {
-				psscli_cmd_queue_next_++;
-				psscli_cmd_queue_next_ %= PSSCLI_SERVER_CMD_QUEUE_MAX;
-				if (psscli_ws_send(&psscli_cmd_queue_[psscli_cmd_queue_next_])) {
-					psscli_cmd_queue_next_--;
-					psscli_cmd_queue_next_ %= PSSCLI_SERVER_CMD_QUEUE_MAX;
+			while (cmd_queue_next != cmd_queue_last) {
+				cmd_queue_next++;
+				cmd_queue_next %= PSSCLI_SERVER_CMD_QUEUE_MAX;
+				if (psscli_ws_send(cmd_queue+cmd_queue_next)) {
+					cmd_queue_next--;
+					cmd_queue_next %= PSSCLI_SERVER_CMD_QUEUE_MAX;
 				}
 			}
 			break;
@@ -66,8 +78,8 @@ int psscli_server_cb(struct lws *wsi, enum lws_callback_reasons reason, void *us
 			break;
 		case LWS_CALLBACK_CLIENT_RECEIVE:
 			lwsl_notice("part recv: %s\n", in);
-			psscli_response *res = &psscli_response_queue_[psscli_response_queue_last_];
-			strcpy(res->content + res->length, in);
+			psscli_response *res = response_queue+response_queue_last;
+			strcpy(res->content+res->length, in);
 			res->length += len;
 
 			// rpc json terminates at newline, if we have it we can dispatch to handler 
@@ -96,12 +108,15 @@ int psscli_server_cb(struct lws *wsi, enum lws_callback_reasons reason, void *us
 				// tell handler this response can be operated on
 				res->done = 1;
 				// initialize next response object in queue so the handler knows where to stop
-				psscli_response_queue_last_++;
-				psscli_response_queue_last_ %= PSSCLI_SERVER_RESPONSE_QUEUE_MAX;
-				psscli_response_queue_[psscli_response_queue_last_].length = 0;
-				psscli_response_queue_[psscli_response_queue_last_].done = 0;
-				lwsl_notice("recv done (last: %d\tnext: %d): %s\n", psscli_response_queue_last_, psscli_response_queue_next_, res->content);
+				response_queue_last++;
+				response_queue_last %= PSSCLI_SERVER_RESPONSE_QUEUE_MAX;
+				(response_queue+response_queue_last)->length = 0;
+				(response_queue+response_queue_last)->done = 0;
+				lwsl_notice("recv done (queue: %p\tlast: %d\tnext: %d): %s\n", response_queue, response_queue_last, response_queue_next, res->content);
 			}
+			break;
+		case 71:
+			fprintf(stderr, "foo");
 			break;
 		default:
 			lwsl_notice("%d\n", reason);
@@ -111,24 +126,103 @@ int psscli_server_cb(struct lws *wsi, enum lws_callback_reasons reason, void *us
 
 
 void psscli_server_sigint_(int s) {
+	psscli_server_stop();
 	close(s);
 	sa_parent.sa_handler(SIGINT);
 }
 
 int psscli_server_load_queue() {
-	psscli_cmd_queue_last_ = 0;
-	psscli_cmd_queue_next_ = 0;
-	psscli_response_queue_last_ = 0;
-	psscli_response_queue_next_ = 0;
-	memset(&psscli_cmd_queue_[0], 0, sizeof(psscli_cmd));
-	memset(&psscli_response_queue_[0], 0, sizeof(psscli_response));
 	return 0;
+}
+
+int psscli_server_init(int mode) {
+	int r;
+	int lcmd;
+	int lresp;
+	int fd;
+	int fd_perm;
+
+	lcmd = PSSCLI_SERVER_CMD_QUEUE_MAX * (PSSCLI_SERVER_CMD_ITEM_MAX + sizeof(psscli_cmd));
+	lresp = PSSCLI_SERVER_RESPONSE_QUEUE_MAX * sizeof(psscli_response);
+
+	fd_perm = S_IRUSR | S_IWUSR | S_IRGRP | S_IWOTH;
+
+	if (mode == PSSCLI_SERVER_MODE_DAEMON) {
+		fd = open(PSSCLI_SERVER_CMD_SHM_PATH, O_CREAT | O_TRUNC, fd_perm);
+		if (fd == -1) {
+			fprintf(stderr, "shm cmd file create failed: %d\n", errno);
+			raise(SIGINT);
+			return 1;
+		}
+		close(fd);
+	}
+	cmd_queue_shm_key = ftok(PSSCLI_SERVER_CMD_SHM_PATH, PSSCLI_SERVER_SHM_PROJ);
+	if (cmd_queue_shm_key == -1) {
+		fprintf(stderr, "shm cmd failed: %d\n", errno);
+		raise(SIGINT);
+		return 1;
+	}
+	cmd_queue_shm_id = shmget(cmd_queue_shm_key, lcmd, 0644 | IPC_CREAT);
+	if (cmd_queue_shm_id == -1) {
+		fprintf(stderr, "shmget cmd failed: %d\n", errno);
+		raise(SIGINT);
+		return 1;
+	}
+	cmd_queue = shmat(cmd_queue_shm_id, (void*)0, 0);
+	if (cmd_queue == (void*)-1) {
+		fprintf(stderr, "shmat cmd failed: %d\n", errno);
+		raise(SIGINT);
+		return 1;
+	}
+
+	if (mode == PSSCLI_SERVER_MODE_DAEMON) {	
+		fd = open(PSSCLI_SERVER_RESPONSE_SHM_PATH, O_CREAT | O_TRUNC, fd_perm);
+		if (fd == -1) {
+			fprintf(stderr, "shm response file create failed: %d\n", errno);
+			raise(SIGINT);
+			return 1;
+		}
+		close(fd);
+	}
+	response_queue_shm_key = ftok(PSSCLI_SERVER_RESPONSE_SHM_PATH, PSSCLI_SERVER_SHM_PROJ);
+	if (response_queue_shm_key == -1) {
+		fprintf(stderr, "shm cmd failed: %d\n", errno);
+		raise(SIGINT);
+		return 1;
+	}
+	response_queue_shm_id = shmget(response_queue_shm_key, lresp, 0640 | IPC_CREAT);
+	if (response_queue_shm_id == -1) {
+		fprintf(stderr, "shmget response failed: %d\n", errno);
+		raise(SIGINT);
+		return 1;
+	}
+	response_queue = shmat(response_queue_shm_id, (void*)0, 0);
+	if (response_queue == (void*)-1) {
+		fprintf(stderr, "shmat response failed: %d\n", errno);
+		raise(SIGINT);
+		return 1;
+	}
+
+	cmd_queue_last = 0;
+	cmd_queue_next = 0;
+	response_queue_last = 0;
+	response_queue_next = 0;
+	memset(cmd_queue, 0, lcmd);
+	memset(response_queue, 0, lresp);
+	fprintf(stderr, "initialized server (cmd_queue: %p\tresponse_queue: %p\n", cmd_queue, response_queue);
+	return 0;
+
+}
+
+int psscli_server_stop() {
+	shmdt(cmd_queue);
+	shmdt(response_queue);
 }
 
 /***
  *
  * \todo issue warning if queue is full
- *
+ * \todo fail if already started
  */
 int psscli_server_start() {
 	unsigned int s2;
@@ -146,15 +240,18 @@ int psscli_server_start() {
 
 	if (!stat(conf.sock, &fstat)) {
 		unlink(conf.sock);
-		//return 1;
 	}
-	s = socket(AF_UNIX, SOCK_STREAM, 0);
+	if ((s = socket(AF_UNIX, SOCK_STREAM, 0)) == -1) {
+		sprintf(psscli_error_string, "socket create %s: %d", conf.sock, errno);
+		return PSSCLI_SOCKET;
+	}
 
 	sl.sun_family = AF_UNIX;
 	strcpy(sl.sun_path, conf.sock);
 	l = strlen(sl.sun_path) + sizeof(sl.sun_family);
 	if (bind(s, (struct sockaddr*)&sl, l)) {
-		return 1;
+		sprintf(psscli_error_string, "socket bind on %s: %d", conf.sock, errno);
+		return PSSCLI_SOCKET;
 	}
 
 	listen(s, 5);
@@ -174,27 +271,27 @@ int psscli_server_start() {
 			char *p;
 
 			// next in queue
-			n = psscli_cmd_queue_last_ + 1;
+			n = cmd_queue_last + 1;
 			n %= PSSCLI_SERVER_CMD_QUEUE_MAX;
 
 			// noop if queue is full
-			if (n == psscli_cmd_queue_next_) {
+			if (n == cmd_queue_next) {
 				n = (unsigned char)PSSCLI_EFULL;
 				send(s2, &n, 1, 0); // -1 = queue full
 				continue;
 			}
-			psscli_cmd_queue_last_ = n;
+			cmd_queue_last = n;
 			n *= -1;
 	
 			// retrieve the command and decide action	
-			cmd = &psscli_cmd_queue_[psscli_cmd_queue_last_];
+			cmd = cmd_queue+cmd_queue_last;
 			psscli_cmd_free(cmd);
 
 			p = (unsigned char*)&buf;
 			cmd->code = *p;
 			cmd->id = *(p+1);
 
-			printf("write (%d) %d -> %d, %p / %p\n", pthread_self(), psscli_cmd_queue_next_, psscli_cmd_queue_last_, &psscli_cmd_queue_next_, &psscli_cmd_queue_last_);
+			fprintf(stderr, "write (%d) %d -> %d, %p / %p\n", pthread_self(), cmd_queue_next, cmd_queue_last, &cmd_queue_next, &cmd_queue_last);
 
 			switch (cmd->code) {
 				case PSSCLI_CMD_BASEADDR:
@@ -278,8 +375,8 @@ int psscli_server_start() {
 
 				default:
 					printf("foo\n");
-					psscli_cmd_queue_last_--;
-					psscli_cmd_queue_last_ %= PSSCLI_SERVER_CMD_QUEUE_MAX;
+					cmd_queue_last--;
+					cmd_queue_last %= PSSCLI_SERVER_CMD_QUEUE_MAX;
 			}
 		}
 	}
@@ -292,12 +389,12 @@ int psscli_server_start() {
  * \todo shared memory for response queue cursors
  */	
 int psscli_server_shift(psscli_response *r) {
-	printf("checking shift\tlast: %d\tnext: %d\n", psscli_response_queue_last_, psscli_response_queue_next_);
-	if (psscli_response_queue_last_ == psscli_response_queue_next_) {
+	printf("checking shift (queue: %p\tlast: %d\tnext: %d\n", response_queue, response_queue_last, response_queue_next);
+	if (response_queue_last == response_queue_next) {
 		return 1;
 	}
-	memcpy(r, &psscli_response_queue_[psscli_response_queue_next_], sizeof(psscli_response));
-	psscli_response_queue_next_++;
-	psscli_response_queue_next_ %= PSSCLI_SERVER_RESPONSE_QUEUE_MAX;
+	memcpy(r, response_queue+response_queue_next, sizeof(psscli_response));
+	response_queue_next++;
+	response_queue_next %= PSSCLI_SERVER_RESPONSE_QUEUE_MAX;
 	return 0;
 }
