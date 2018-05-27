@@ -14,19 +14,19 @@ obj:
 	gcc -g3 ${INCLUDE} -c ${SRCDIR}/cmd.c -o ${BUILDDIR}/cmd.o
 
 test-connect: obj
-	gcc -g3 ${INCLUDE} -o ${BUILDDIR}/connect.o -c ${TESTDIR}/connect.c
+	gcc -g3 ${INCLUDE} -o ${BUILDDIR}/connect.o -c ${TESTDIR}/node/connect.c
 	gcc -g3 ${INCLUDE} -o ${BUILDDIR}/test_connect ${BUILDDIR}/connect.o ${BUILDDIR}/ws.o ${BUILDDIR}/cmd.o -lwebsockets -ljson-c
 
 test-baseaddr: obj
-	gcc -g3 ${INCLUDE} -o ${BUILDDIR}/baseaddr.o -c ${TESTDIR}/baseaddr.c
+	gcc -g3 ${INCLUDE} -o ${BUILDDIR}/baseaddr.o -c ${TESTDIR}/node/baseaddr.c
 	gcc -g3 ${INCLUDE} -o ${BUILDDIR}/test_baseaddr ${BUILDDIR}/baseaddr.o ${BUILDDIR}/ws.o ${BUILDDIR}/cmd.o -lwebsockets -ljson-c
 
 test-loadpeers: obj
-	gcc -g3 ${INCLUDE} -o ${BUILDDIR}/loadpeers.o -c ${TESTDIR}/loadpeers.c
+	gcc -g3 ${INCLUDE} -o ${BUILDDIR}/loadpeers.o -c ${TESTDIR}/unit/loadpeers.c
 	gcc -g3 ${INCLUDE} -o ${BUILDDIR}/test_loadpeers ${BUILDDIR}/loadpeers.o ${BUILDDIR}/psscli.o ${BUILDDIR}/util.o -ljson-c
 
 test-server: obj
-	gcc -g3 ${INCLUDE} -o ${BUILDDIR}/test_server.o -c ${TESTDIR}/server.c
+	gcc -g3 ${INCLUDE} -o ${BUILDDIR}/test_server.o -c ${TESTDIR}/node/server.c
 	gcc -g3 ${INCLUDE} -o ${BUILDDIR}/test_server ${BUILDDIR}/test_server.o ${BUILDDIR}/server.o ${BUILDDIR}/std.o ${BUILDDIR}/cmd.o ${BUILDDIR}/ws.o -lwebsockets -lpthread -ljson-c
 
 tools: obj

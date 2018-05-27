@@ -35,6 +35,10 @@ int psscli_check_peer_capacity(psscli *c) {
 	return 0;
 }
 
+int psscli_peer_count(psscli *c) {
+	return c->peer_count;
+}
+
 enum psscli_error psscli_add_peer(psscli *c, const char *key, unsigned int *idx) {
 	psscli_peer *peer;
 
@@ -72,7 +76,7 @@ enum psscli_error psscli_add_peer(psscli *c, const char *key, unsigned int *idx)
 enum psscli_error psscli_peer_get(psscli *c, unsigned int idx, char item, void **value) {
 	psscli_peer *peer;
 
-	peer = c->peers + idx;
+	peer = c->peers+idx;
 
 	if (peer == NULL) {
 		return PSSCLI_ENODATA;
@@ -81,6 +85,7 @@ enum psscli_error psscli_peer_get(psscli *c, unsigned int idx, char item, void *
 	switch (item) {
 		case PSSCLI_PEER_KEY:
 			strcpy(*value, (char*)peer->key);
+			break;
 		case PSSCLI_PEER_ADDRESS:
 			strcpy(*value, (char*)peer->address);
 			break;

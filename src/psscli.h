@@ -19,6 +19,7 @@ enum psscli_error psscli_add_peer(psscli *c, const char *key, unsigned int *idx)
 enum psscli_error psscli_peer_get(psscli *c, unsigned int idx, char item, void **value);
 enum psscli_error psscli_peer_set(psscli *c, unsigned int idx, char item, void *value);
 int psscli_check_peer_capacity(psscli *c);
+int psscli_peer_count(psscli *c);
 void psscli_free(psscli *c);
 
 #endif // PSSCLI_H_
