@@ -6,16 +6,30 @@
 #include <stdlib.h>
 #include <signal.h>
 #include <stdio.h>
+#include <pthread.h>
 
 #include "cmd.h"
 #include "ws.h"
+#include "sync.h"
+#include "error.h"
 
-extern struct psscli_ws_ psscli_ws;
-
+// ws 
 struct lws_protocols psscli_protocols_[] = {
 	{ PSSCLI_WS_PROTOCOL_NAME, NULL, 0, PSSCLI_WS_RX_BUFFER },
 	{ NULL, NULL, 0, 0}
 };
+extern struct psscli_ws_ psscli_ws;
+
+// sync controls
+extern pthread_t pt_parse;
+extern pthread_t pt_write;
+extern pthread_cond_t pt_cond_parse;
+extern pthread_cond_t pt_cond_write;
+extern pthread_mutex_t pt_lock_state;
+extern pthread_mutex_t pt_lock_queue;
+
+// queues
+extern psscli_cmd psscli_cmd_current;
 
 // internal functions
 static int psscli_ws_write_(struct lws *ws, char *buf, int buflen, enum lws_write_protocol wp);
@@ -29,7 +43,6 @@ void psscli_ws_connect_try_(int s) {
 	if (s > 0) {
 		sleep(1);
 	}
-	psscli_ws.connected = 1;
 }
 
 // set up websocket and ipc
@@ -37,6 +50,7 @@ int psscli_ws_init(psscli_ws_callback callback, const char *version) {
 	struct sigaction sa;
 
 	psscli_protocols_[0].callback = (void*)callback;
+	psscli_protocols_[0].user = (void*)&psscli_cmd_current;
 	memset(&(psscli_ws.wci), 0, sizeof(psscli_ws.wci));
 	psscli_ws.wci.uid = -1;
 	psscli_ws.wci.gid = -1;
@@ -77,24 +91,130 @@ int psscli_ws_init(psscli_ws_callback callback, const char *version) {
 	return 0;
 }
 
+static int parse(psscli_response *r) {
+	fprintf(stderr, "got response: %s\n", r);
+	return 0;
+}
+
+static void *parse_loop() {
+	int run;
+	int c;
+	int last;
+	psscli_response *p;
+	psscli_response response;
+
+	fprintf(stderr, "entering parseloop\n");
+	pthread_mutex_lock(&pt_lock_state);
+	run = psscli_ws.pid;
+	pthread_mutex_unlock(&pt_lock_state);
+	while (run) {
+		pthread_mutex_lock(&pt_lock_state);
+		pthread_cond_wait(&pt_cond_parse, &pt_lock_state);
+		run = psscli_ws.pid;
+		if (!run) {
+			pthread_mutex_unlock(&pt_lock_state);
+			fprintf(stderr, "parseloop exit\n");
+			pthread_exit(&pt_parse);
+			break;
+		}
+		while(1) {
+			pthread_mutex_lock(&pt_lock_queue);
+			p = psscli_response_queue_next();
+			if (p == NULL) {
+				pthread_mutex_unlock(&pt_lock_queue);
+				break;
+			}
+			memcpy(&response, p, sizeof(response));
+			pthread_mutex_unlock(&pt_lock_queue);
+			if (parse(&response)) {
+				break;
+			}
+		}
+	}
+
+	return NULL;
+}
+
+static void *write_loop() {
+	int run;
+	int last;
+	int next;
+	psscli_cmd *cmd;
+
+	fprintf(stderr, "entering writeloop\n");
+	pthread_mutex_lock(&pt_lock_state);
+	run = psscli_ws.pid;
+	pthread_mutex_unlock(&pt_lock_state);
+	while (run) {
+		pthread_mutex_lock(&pt_lock_state);
+		pthread_cond_wait(&pt_cond_write, &pt_lock_state);
+		fprintf(stderr, "writeloop wakeup\n");
+		run = psscli_ws.pid;
+		if (!run) {
+			pthread_mutex_unlock(&pt_lock_state);
+			fprintf(stderr, "writeloop exit\n");
+			pthread_exit(&pt_write);
+			break;
+		}
+		pthread_mutex_unlock(&pt_lock_state);
+		pthread_mutex_lock(&pt_lock_queue);
+		cmd = psscli_cmd_queue_next();
+		if (cmd == NULL) {
+			pthread_mutex_unlock(&pt_lock_queue);
+			continue;
+		}
+
+		// set the next command to be sent only if:
+		// * we don't have a current command, OR
+		// * the current command is still pending
+		if (cmd->code == PSSCLI_CMD_NONE) {
+			fprintf(stderr, "next is noop");
+			continue;
+		}
+		if (psscli_cmd_copy(&psscli_cmd_current, cmd)) {
+			fprintf(stderr, "cmd copy fail in write thread\n");
+			continue;
+		}
+		pthread_mutex_unlock(&pt_lock_queue);
+
+		// if command is pending, then calling writable will try to dispatch it again
+		lws_callback_on_writable(psscli_ws.w);
+	}
+
+	return NULL;
+}
+
+
 /***
  * \short connects to websocket on swarm (pss) node
  * \description polls for servicing the websocket and reads from command unix socket pipe every turn
  * \todo retry loop on connect fail
  */ 
-void *psscli_ws_connect() {
-	char n[2];
+int psscli_ws_connect() {
+	int r;
+
 	//lws_client_connect_via_info(&psscli_ws.wi);
 	psscli_ws_connect_try_(0);
-	while (psscli_ws.pid) {
-		printf("poll\n");
-		lws_service(psscli_ws.ctx, PSSCLI_WS_LOOP_TIMEOUT);
-		if (psscli_ws.connected) {
-			if (read(psscli_ws.notify[0], &n, 2) > 0) {
-				lws_callback_on_writable(psscli_ws.w);
-			}
-		}
+	r = pthread_create(&pt_parse, NULL, parse_loop, NULL);
+	if (r) {
+		fprintf(stderr, "parse thread create fail\n");
+		return PSSCLI_EINIT;
 	}
+	r = pthread_create(&pt_write, NULL, write_loop, NULL);
+	if (r) {
+		fprintf(stderr, "write thread create fail\n");
+		return PSSCLI_EINIT;
+	}
+	while (psscli_ws.pid) {
+		fprintf(stderr, "poll ws\n");
+		lws_service(psscli_ws.ctx, PSSCLI_WS_LOOP_TIMEOUT);
+	}
+	pthread_cond_signal(&pt_cond_write);
+	pthread_cond_signal(&pt_cond_parse);
+	pthread_join(pt_write, NULL);
+	pthread_join(pt_parse, NULL);
+	fprintf(stderr, "connect loop exiting\n");
+	return PSSCLI_EOK;
 }
 
 void psscli_ws_free() {

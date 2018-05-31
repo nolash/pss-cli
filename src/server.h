@@ -26,4 +26,3 @@ int psscli_server_shift(psscli_response *r);
 int psscli_server_cb(struct lws *wsi, enum lws_callback_reasons reason, void *user, void *in, size_t len);
 
 #endif // PSSCLI_SERVER_H_
-

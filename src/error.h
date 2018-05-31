@@ -8,8 +8,9 @@ enum psscli_error {
 	PSSCLI_EFULL,
 	PSSCLI_EINVAL,
 	PSSCLI_ENODATA,
-
-	PSSCLI_SOCKET,
+	PSSCLI_ESOCK,
+	PSSCLI_EBUSY,
+	PSSCLI_EINIT,
 };
 
 char psscli_error_string[1024];

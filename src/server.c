@@ -106,7 +106,7 @@ int psscli_server_cb(struct lws *wsi, enum lws_callback_reasons reason, void *us
 				// null-terminate response string
 				*(res->content + res->length) = 0;
 				// tell handler this response can be operated on
-				res->done = 1;
+				res->status = PSSCLI_RESPONSE_STATUS_RECEIVED;
 				// initialize next response object in queue so the handler knows where to stop
 				response_queue_last++;
 				response_queue_last %= PSSCLI_SERVER_RESPONSE_QUEUE_MAX;

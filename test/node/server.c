@@ -10,6 +10,7 @@
 #include "server.h"
 #include "ws.h"
 #include "std.h"
+#include "config.h"
 
 #define TESTKEY "049cbde8b50e5420055ee1ee174dc1e61a8388933d12c66ad0e4e45bbe76cc93cd0c940d586f95bb36b65ae9241e1e57b54c8684f44c3a82351c892750afcb36f0"
 #define TESTTOPIC "deadbeef"
@@ -52,6 +53,8 @@ int main() {
 	psscli_response res;
 	struct timespec ts;
 
+	psscli_config_init();
+
 	// initialize websocket params
 	psscli_ws.host = "192.168.0.42";
 	psscli_ws.origin = psscli_ws.host;
@@ -91,7 +94,7 @@ int main() {
 		return 3;
 	}
 	rs.sun_family = AF_UNIX;
-	strcpy(rs.sun_path, PSSCLI_SERVER_SOCKET_PATH);
+	strcpy(rs.sun_path, conf.sock);
 	l = strlen(rs.sun_path) + sizeof(rs.sun_family);
 	if (connect(s, (struct sockaddr *)&rs, l) == -1) {
 		return 3;
