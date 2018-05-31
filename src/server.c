@@ -37,7 +37,7 @@ int psscli_server_cb(struct lws *wsi, enum lws_callback_reasons reason, void *us
 
 	switch (reason) {
 		case LWS_CALLBACK_CLIENT_WRITEABLE:
-			//printf("read (%d) %d -> %d, %p / %p\n", pthread_self(), psscli_cmd_queue_next_, psscli_cmd_queue_last_, &psscli_cmd_queue_next_, &psscli_cmd_queue_last_);
+			printf("read (%d) %d -> %d, %p / %p\n", pthread_self(), psscli_cmd_queue_next_, psscli_cmd_queue_last_, &psscli_cmd_queue_next_, &psscli_cmd_queue_last_);
 			// send all commands in the queue
 			while (psscli_cmd_queue_next_ != psscli_cmd_queue_last_) {
 				psscli_cmd_queue_next_++;
@@ -94,7 +94,7 @@ int psscli_server_cb(struct lws *wsi, enum lws_callback_reasons reason, void *us
 				// null-terminate response string
 				*(res->content + res->length) = 0;
 				// tell handler this response can be operated on
-				res->done = 1;
+				res->status = PSSCLI_RESPONSE_STATUS_RECEIVED;
 				// initialize next response object in queue so the handler knows where to stop
 				psscli_response_queue_last_++;
 				psscli_response_queue_last_ %= PSSCLI_SERVER_RESPONSE_QUEUE_MAX;

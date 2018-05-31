@@ -8,6 +8,10 @@ enum psscli_error {
 	PSSCLI_EFULL,
 	PSSCLI_EINVAL,
 	PSSCLI_ENODATA,
+	PSSCLI_EBUSY,
+	PSSCLI_EINIT,
 };
+
+char psscli_errorstr[1024];
 
 #endif // PSSCLI_ERROR_H_

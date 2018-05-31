@@ -9,6 +9,7 @@
 #define PSSCLI_WS_LOOP_TIMEOUT 100
 
 #include <libwebsockets.h>
+#include <pthread.h>
 #include "cmd.h"
 
 struct psscli_ws_ {
@@ -32,7 +33,7 @@ struct psscli_ws_ {
 typedef int(*psscli_ws_callback)(struct lws *wsi, enum lws_callback_reasons reason, void *user, void *in, size_t len);
 
 int psscli_ws_init(psscli_ws_callback callback, const char *version);
-void* psscli_ws_connect();
+int psscli_ws_connect();
 void psscli_ws_free();
 int psscli_ws_send(psscli_cmd *cmd);
 
