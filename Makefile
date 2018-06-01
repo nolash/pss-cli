@@ -10,7 +10,7 @@ obj:
 	gcc -g3 ${INCLUDE} -c ${SRCDIR}/psscli.c -o ${BUILDDIR}/psscli.o 
 	gcc -g3 ${INCLUDE} -c ${SRCDIR}/config.c -o ${BUILDDIR}/config.o 
 	gcc -g3 ${INCLUDE} -c ${SRCDIR}/util.c -o ${BUILDDIR}/util.o 
-	gcc -g3 ${INCLUDE} -c ${SRCDIR}/ws.c -o ${BUILDDIR}/ws.o
+	gcc ${CFLAGS} -g3 ${INCLUDE} -c ${SRCDIR}/ws.c -o ${BUILDDIR}/ws.o
 	#gcc -g3 ${INCLUDE} -c ${SRCDIR}/server.c -o ${BUILDDIR}/server.o
 	gcc -g3 ${INCLUDE} -c ${SRCDIR}/cmd.c -o ${BUILDDIR}/cmd.o
 	gcc -g3 ${INCLUDE} -c ${SRCDIR}/error.c -o ${BUILDDIR}/error.o
@@ -36,6 +36,8 @@ test-unit: obj
 	gcc -g3 ${INCLUDE} -o ${BUILDDIR}/test_minq ${BUILDDIR}/test_minq.o ${BUILDDIR}/minq.o
 	gcc -g3 ${INCLUDE} -o ${BUILDDIR}/test_cmd.o -c ${TESTDIR}/unit/cmd.c
 	gcc -g3 ${INCLUDE} -o ${BUILDDIR}/test_cmd ${BUILDDIR}/test_cmd.o ${BUILDDIR}/cmd.o ${BUILDDIR}/minq.o
+	gcc -g3 ${INCLUDE} -o ${BUILDDIR}/test_ws.o -c ${TESTDIR}/unit/ws.c
+	gcc -g3 ${INCLUDE} -o ${BUILDDIR}/test_ws ${BUILDDIR}/test_ws.o ${BUILDDIR}/cmd.o ${BUILDDIR}/minq.o ${BUILDDIR}/ws.o -ljson-c -lwebsockets -lpthread
 
 tools: obj
 	gcc -g3 ${INCLUDE} -o ${BUILDDIR}/pssd.o -c ${TOOLSDIR}/pssd.c

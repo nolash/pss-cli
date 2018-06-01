@@ -12,6 +12,7 @@
 #include "ws.h"
 #include "sync.h"
 #include "error.h"
+#include "extra.h"
 
 // ws 
 struct lws_protocols psscli_protocols_[] = {
@@ -33,7 +34,7 @@ extern psscli_cmd psscli_cmd_current;
 
 // internal functions
 static int psscli_ws_write_(struct lws *ws, char *buf, int buflen, enum lws_write_protocol wp);
-static int psscli_ws_json_(char *json_string, int json_string_len, psscli_cmd *cmd);
+PRIVATE int psscli_ws_json_(char *json_string, int json_string_len, psscli_cmd *cmd);
 json_object *j_version;
 void psscli_ws_connect_try_(int s);
 
@@ -283,7 +284,7 @@ int psscli_ws_json_(char *json_string, int json_string_len, psscli_cmd *cmd) {
 			json_object_array_add(jp, jv);
 			jv = json_object_new_string(*(cmd->values+1));
 			json_object_array_add(jp, jv);
-			if ((cmd->values+2) != NULL) {
+			if (*(cmd->values+2) != NULL) {
 				jv = json_object_new_string(*(cmd->values+2));
 			} else {
 				jv = json_object_new_string("0x");

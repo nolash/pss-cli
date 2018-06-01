@@ -6,13 +6,15 @@
 #define PSSCLI_CMD_QUEUE_MAX 64
 #define PSSCLI_RESPONSE_QUEUE_MAX 64
 
-#define PSSCLI_RESPONSE_STATUS_UNSENT 0
+#define PSSCLI_RESPONSE_STATUS_NONE 0
 #define PSSCLI_RESPONSE_STATUS_PENDING 1
 #define PSSCLI_RESPONSE_STATUS_RECEIVED 2
 #define PSSCLI_RESPONSE_STATUS_PARSED 3
 
-#define PSSCLI_CMD_STATUS_PENDING 0
-#define PSSCLI_CMD_STATUS_SENT 1
+#define PSSCLI_CMD_STATUS_NONE 0
+#define PSSCLI_CMD_STATUS_PENDING 1
+#define PSSCLI_CMD_STATUS_SENT 2
+
 
 enum psscli_cmd_code {
 	PSSCLI_CMD_NONE,
@@ -37,6 +39,8 @@ typedef struct psscli_response_ {
 	char content[PSSCLI_CMD_RESPONSE_MAX]; 
 	int length;
 } psscli_response;
+
+psscli_response psscli_response_current;
 
 /***
  * \brief set up command queues
@@ -67,6 +71,8 @@ psscli_cmd* psscli_cmd_alloc(psscli_cmd *cmd, int valuecount);
 
 /***
  * \brief release all resources held by command
+ *
+ * Will free all allocations on individual pointers in the values array, from 0 to valuecount. If a pointer is NULL, free will not be attempted.
  *
  * \param cmd command to release
  */

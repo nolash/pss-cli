@@ -15,6 +15,10 @@ queue_t response_queue;
 int psscli_queue_start(short cmdsize, short responsesize) {
 	minq_init(&cmd_queue, cmdsize);
 	minq_init(&response_queue, responsesize);
+	psscli_cmd_current.status = PSSCLI_CMD_STATUS_NONE;
+	psscli_cmd_current.valuecount = 0;
+	psscli_response_current.status = PSSCLI_RESPONSE_STATUS_NONE;
+	psscli_response_current.length = 0;
 	started = 1;
 	return PSSCLI_EOK;
 }
