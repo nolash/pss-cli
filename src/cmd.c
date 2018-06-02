@@ -12,6 +12,9 @@ static char started;
 queue_t cmd_queue;
 queue_t response_queue;
 
+// incremented on each queued message
+static int seq;
+
 int psscli_queue_start(short cmdsize, short responsesize) {
 	minq_init(&cmd_queue, cmdsize);
 	minq_init(&response_queue, responsesize);
@@ -20,6 +23,7 @@ int psscli_queue_start(short cmdsize, short responsesize) {
 	psscli_response_current.status = PSSCLI_RESPONSE_STATUS_NONE;
 	psscli_response_current.length = 0;
 	started = 1;
+	seq = 0;
 	return PSSCLI_EOK;
 }
 
@@ -87,6 +91,7 @@ int psscli_cmd_queue_add(psscli_cmd *cmd) {
 	if (minq_add(&cmd_queue, (void*)cmd) == -1) {
 		return -1;
 	}
+	cmd->id = seq++;
 	return 0;
 }
 

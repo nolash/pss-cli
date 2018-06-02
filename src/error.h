@@ -11,6 +11,8 @@ enum psscli_error {
 	PSSCLI_ESOCK,
 	PSSCLI_EBUSY,
 	PSSCLI_EINIT,
+	PSSCLI_EOVERFLOW,
+	PSSCLI_ESYNC,
 };
 
 char psscli_error_string[1024];

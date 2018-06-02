@@ -93,6 +93,8 @@ int psscli_cmd_copy(psscli_cmd *to, psscli_cmd *from);
 /***
  * \brief add a command to the queue
  *
+ * Sets cmd id to serial number of queue
+ *
  * Not thread safe
  *
  * \param cmd pointer to command to add
