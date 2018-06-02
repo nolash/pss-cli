@@ -3,12 +3,14 @@
 #include <pthread.h>
 #include <errno.h>
 
-pthread_t pt_server;
-
 #include "server2.h"
 #include "ws.h"
 #include "config.h"
 #include "cmd.h"
+#include "sync.h"
+
+pthread_t pt_server;
+extern pthread_cond_t pt_cond_reply;
 
 void *server(void *arg) {
 	psscli_server_start();
@@ -20,8 +22,10 @@ int test_sock() {
 	struct timespec ts;
 	struct sockaddr_un rs;
 	int sd;
-	int l;
+	int c;
 	unsigned char b[1024];
+	psscli_cmd *cmd;
+	psscli_response response;
 
 	psscli_config_init();
 	psscli_queue_start(2, 2);
@@ -47,12 +51,12 @@ int test_sock() {
 	}
 	rs.sun_family = AF_UNIX;
 	strcpy(rs.sun_path, conf.sock);
-	l = strlen(rs.sun_path) + sizeof(rs.sun_family);
+	c = strlen(rs.sun_path) + sizeof(rs.sun_family);
 	
 
 	b[0] = PSSCLI_CMD_BASEADDR;
 	strcpy(b+1, "foo");
-	if (connect(sd, (struct sockaddr *)&rs, l) == -1) {
+	if (connect(sd, (struct sockaddr *)&rs, c) == -1) {
 		psscli_server_stop();
 		pthread_join(pt_server, NULL);
 		return 3;
@@ -61,13 +65,41 @@ int test_sock() {
 		psscli_server_stop();
 		pthread_join(pt_server, NULL);
 		return 3;
-	} else if (l = recv(sd, &b, 1024, 0) <= 0) {
-		fprintf(stderr, "recv 1 fail\n");
+	}
+
+	while (psscli_cmd_queue_peek() == NULL) {
+		nanosleep(&ts, NULL);
+	}
+
+	cmd = psscli_cmd_queue_next();
+	if (cmd == NULL) {
+		fprintf(stderr, "can't get cmd\n");
 		psscli_server_stop();
 		pthread_join(pt_server, NULL);
-		return 3;
+		return 4;
 	}
-	fprintf(stderr, "recv 1: %d\n", *((int*)b));
+
+	response.id = cmd->id;
+	response.status = PSSCLI_RESPONSE_STATUS_PARSED;
+	strcpy(response.content, "baz");
+	response.length = 3;
+	if (psscli_response_queue_add(&response) == -1) {
+		fprintf(stderr, "can't add response\n");
+		psscli_server_stop();
+		pthread_join(pt_server, NULL);
+		return 5;
+	}
+
+	pthread_cond_signal(&pt_cond_reply);
+	if ((c = recv(sd, b, 1024, 0)) == -1) {
+		fprintf(stderr, "can't receive response\n");
+		psscli_server_stop();
+		pthread_join(pt_server, NULL);
+		return 6;
+	}
+
+	b[c] = 0;
+	fprintf(stderr, "recv 1: %s\n", b);
 
 	b[0] = PSSCLI_CMD_BASEADDR;
 	strcpy(b+1, "bar");
@@ -75,14 +107,42 @@ int test_sock() {
 		fprintf(stderr, "send 2 fail\n");
 		psscli_server_stop();
 		pthread_join(pt_server, NULL);
-		return 4;
-	} else if (l = recv(sd, &b, 1024, 0) <= 0) {
-		fprintf(stderr, "recv 2 fail\n");
+		return 7;
+	}
+
+	while (psscli_cmd_queue_peek() == NULL) {
+		nanosleep(&ts, NULL);
+	}
+
+	cmd = psscli_cmd_queue_next();
+	if (cmd == NULL) {
+		fprintf(stderr, "can't get cmd\n");
 		psscli_server_stop();
 		pthread_join(pt_server, NULL);
-		return 4;
+		return 8;
 	}
-	fprintf(stderr, "recv 2: %d\n", *((int*)b));
+
+	response.id = cmd->id;
+	response.status = PSSCLI_RESPONSE_STATUS_PARSED;
+	strcpy(response.content, "xyzzy");
+	response.length = 5;
+	if (psscli_response_queue_add(&response) == -1) {
+		fprintf(stderr, "can't add response\n");
+		psscli_server_stop();
+		pthread_join(pt_server, NULL);
+		return 9;
+	}
+
+	pthread_cond_signal(&pt_cond_reply);
+	if ((c = recv(sd, b, 1024, 0)) == -1) {
+		fprintf(stderr, "can't receive response\n");
+		psscli_server_stop();
+		pthread_join(pt_server, NULL);
+		return 10;
+	}
+
+	b[c] = 0;
+	fprintf(stderr, "recv 2: %s\n", b);
 
 	close(sd);
 	psscli_server_stop();
