@@ -34,7 +34,8 @@ extern psscli_cmd psscli_cmd_current;
 
 // internal functions
 static int psscli_ws_write_(struct lws *ws, char *buf, int buflen, enum lws_write_protocol wp);
-PRIVATE int psscli_ws_json_(char *json_string, int json_string_len, psscli_cmd *cmd);
+PRIVATE int json_cmd_write(char *json_string, int json_string_len, psscli_cmd *cmd);
+PRIVATE int json_response_parse(psscli_response *response);
 json_object *j_version;
 void psscli_ws_connect_try_(int s);
 
@@ -234,7 +235,7 @@ int psscli_ws_send(psscli_cmd *cmd) {
 	int r;
 	json_object *j;
 
-	r = psscli_ws_json_(in_buf + LWS_PRE, 1024 - LWS_PRE, cmd);
+	r = json_cmd_write(in_buf + LWS_PRE, 1024 - LWS_PRE, cmd);
 	if (r) {
 		return 2;
 	}
@@ -258,8 +259,50 @@ int psscli_ws_write_(struct lws *ws, char *buf, int buflen, enum lws_write_proto
 	return r;
 }
 
+int json_response_parse(psscli_response *response) {
+	json_tokener *jt;
+	json_object *j;
+	json_object *jv;
+
+	if (response->status != PSSCLI_RESPONSE_STATUS_RECEIVED) {
+		return PSSCLI_ENODATA;
+	}
+
+	jt = json_tokener_new();
+	j = json_tokener_parse_ex(jt, response->content, response->length);
+	if (j == NULL) {
+		return PSSCLI_EINVAL;
+	}
+	json_tokener_free(jt);
+
+	if (!json_object_object_get_ex(j, "jsonrpc", &jv)) {
+		return PSSCLI_EINVAL;
+	} else if (strcmp(json_object_get_string(jv), json_object_get_string(j_version))) {
+		return PSSCLI_EINVAL;
+	}
+
+	if(!json_object_object_get_ex(j, "id", &jv)) {
+		response->status = PSSCLI_RESPONSE_STATUS_INVALID;
+		return PSSCLI_EINVAL;
+	}
+	response->id = strtol(json_object_get_string(jv), NULL, 10);
+	if (errno) {
+		response->status = PSSCLI_RESPONSE_STATUS_INVALID;
+		return PSSCLI_EINVAL;
+	}
+	if (!json_object_object_get_ex(j, "result", &jv)) {
+		response->status = PSSCLI_RESPONSE_STATUS_INVALID;
+		return PSSCLI_EINVAL;
+	}
+	strcpy(response->content, json_object_get_string(jv));
+	response->length = strlen(response->content);
+
+	json_tokener_free(jt);
+	return PSSCLI_EOK;
+}
+
 // create json rpc string from cmd 
-int psscli_ws_json_(char *json_string, int json_string_len, psscli_cmd *cmd) {
+int json_cmd_write(char *json_string, int json_string_len, psscli_cmd *cmd) {
 	json_object *j;
 	json_object *jp;
 	json_object *jv;

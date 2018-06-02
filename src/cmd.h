@@ -10,6 +10,7 @@
 #define PSSCLI_RESPONSE_STATUS_PENDING 1
 #define PSSCLI_RESPONSE_STATUS_RECEIVED 2
 #define PSSCLI_RESPONSE_STATUS_PARSED 3
+#define PSSCLI_RESPONSE_STATUS_INVALID 4
 
 #define PSSCLI_CMD_STATUS_NONE 0
 #define PSSCLI_CMD_STATUS_PENDING 1
@@ -24,7 +25,7 @@ enum psscli_cmd_code {
 };
 
 typedef struct psscli_cmd_ {
-	int id;
+	long int id;
 	char status;
 	enum psscli_cmd_code code;
 	char **values;
@@ -34,7 +35,7 @@ typedef struct psscli_cmd_ {
 psscli_cmd psscli_cmd_current;
 
 typedef struct psscli_response_ {
-	char id;
+	long int id;
 	char status;
 	char content[PSSCLI_CMD_RESPONSE_MAX]; 
 	int length;
