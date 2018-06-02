@@ -3,7 +3,7 @@
 #include <pthread.h>
 #include <errno.h>
 
-#include "server2.h"
+#include "server.h"
 #include "ws.h"
 #include "config.h"
 #include "cmd.h"
@@ -18,6 +18,7 @@ void *server(void *arg) {
 	return NULL;
 }
 
+// \todo segfaults on shutdown
 int test_sock() {
 	struct timespec ts;
 	struct sockaddr_un rs;
@@ -28,6 +29,8 @@ int test_sock() {
 	psscli_response response;
 
 	psscli_config_init();
+
+	psscli_start();
 	psscli_queue_start(2, 2);
 
 	if (pthread_create(&pt_server, NULL, server, NULL) == -1) {
@@ -147,6 +150,7 @@ int test_sock() {
 	psscli_cmd_free(cmd);
 
 	close(sd);
+	psscli_stop();
 	psscli_server_stop();
 	pthread_join(pt_server, NULL);
 	psscli_queue_stop();

@@ -1,28 +1,43 @@
 #ifndef PSSCLI_SERVER_H_
 #define PSSCLI_SERVER_H_
 
-#define PSSCLI_SERVER_SOCKET_PATH "/tmp/pssclisock"
-#define PSSCLI_SERVER_SOCKET_BUFFER_SIZE 1024
-#define PSSCLI_SERVER_SOCKET_READ_SIZE 128
-#define PSSCLI_SERVER_SHM_PROJ 922
-#define PSSCLI_SERVER_CMD_SHM_PATH "/tmp/psscli-cmd.shm"
-#define PSSCLI_SERVER_CMD_QUEUE_MAX 64
-#define PSSCLI_SERVER_CMD_ITEM_MAX 8192
-#define PSSCLI_SERVER_RESPONSE_SHM_PATH "/tmp/psscli-response.shm"
-#define PSSCLI_SERVER_RESPONSE_QUEUE_MAX 64
+#define PSSCLI_SERVER_SOCK_MAX 8
+#define PSSCLI_SERVER_SOCK_BUFFERSIZE 8096
+#define PSSCLI_SERVER_SOCK_PATH "/tmp/pss.ipc"
 
-#define PSSCLI_SERVER_MODE_DAEMON 0
-#define PSSCLI_SERVER_MODE_CLIENT 1
+#define PSSCLI_SERVER_STATUS_IDLE 0
+#define PSSCLI_SERVER_STATUS_RUNNING 1
 
-#include "cmd.h"
-#include "ws.h"
-
-int psscli_server_init(int mode);
+/***
+ * \brief start the socket server
+ *
+ * starts the main run loop and the reply processing thread
+ *
+ * \return 0 on successful exit
+ * \todo find better way of preventing overwrite of cursor passed to socket connection handler
+ */
 int psscli_server_start();
-int psscli_server_stop();
-int psscli_server_shift(psscli_response *r);
 
-// \todo change to init function to fill in callback in ws
-int psscli_server_cb(struct lws *wsi, enum lws_callback_reasons reason, void *user, void *in, size_t len);
+/***
+ * \brief stop the socket server
+ *
+ * stops all threads and the main run loop
+ *
+ */
+void psscli_server_stop();
+
+/***
+ * \brief check the running status of the socket server
+ *
+ * \return 0 if idle, 1 if running
+ */
+int psscli_server_status();
+
+/***
+ * \brief blocks until socket server is ready, or until timeout is expired
+ *
+ * \return 0 if ready, 1 if timeout
+ */
+int psscli_server_ready(int timeout_seconds);
 
 #endif // PSSCLI_SERVER_H_

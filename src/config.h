@@ -7,7 +7,7 @@ struct psscli_config {
 	char sock[512];
 } conf;
 
-int *psscli_config_init();
+void psscli_config_init();
 int psscli_config_load(const char *path);
 int psscli_config_parse(int c, char **v, int errLen, char *zErr);
 

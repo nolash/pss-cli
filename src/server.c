@@ -1,400 +1,292 @@
-#include <string.h>
-#include <stdlib.h>
-#include <signal.h>
 #include <stdio.h>
-#include <fcntl.h>
+#include <stdlib.h>
+#include <errno.h>
 #include <unistd.h>
-#include <pthread.h>
 #include <sys/socket.h>
-#include <sys/shm.h>
-#include <sys/types.h>
-#include <sys/stat.h>
-#include <sys/ipc.h>
 #include <sys/un.h>
+#include <sys/stat.h>
+#include <time.h>
+#include <pthread.h>
 
-#include "cmd.h"
 #include "server.h"
-#include "ws.h"
-#include "error.h"
-#include "std.h"
 #include "config.h"
+#include "cmd.h"
+#include "sync.h"
+#include "error.h"
 
-static char b[1024];
+// server
+static int sd;
+static int run;
 
-extern struct psscli_config conf;
-extern struct psscli_ws_ psscli_ws;
-static char cmd_queue_next;
-static char cmd_queue_last;
-static int response_queue_next;
-static int response_queue_last;
-psscli_cmd *cmd_queue;
-psscli_response *response_queue;
+// client session
+static int sdlist[PSSCLI_SERVER_SOCK_MAX]; // sockets descriptors indexed on socket connection id
+static int idlist[PSSCLI_SERVER_SOCK_MAX]; // socket connection ids indexed on ws session id
+static int cursor;
 
-unsigned int s;
-struct sigaction sa_parent;
+// sync
+static pthread_rwlock_t pt_rw;
+static pthread_t pt_cmd[PSSCLI_SERVER_SOCK_MAX];
+static pthread_t pt_reply;
+extern pthread_mutex_t pt_lock_queue;
+extern pthread_cond_t pt_cond_reply;
+extern pthread_cond_t pt_cond_write;
 
-key_t cmd_queue_shm_key;
-int cmd_queue_shm_id;
-key_t response_queue_shm_key;
-int response_queue_shm_id;
+int psscli_server_status() {
+	if (!run) {
+		return PSSCLI_SERVER_STATUS_IDLE;
+	}
+	return PSSCLI_SERVER_STATUS_RUNNING;
+}
 
-/***
- * \todo add lws_rx_flow_control() if response queue is full
- * \todo handle send failure with timeout and possible notify
- */
-int psscli_server_cb(struct lws *wsi, enum lws_callback_reasons reason, void *user, void *in, size_t len) {
-	int n;
-	char *t;
+// handle socket input command
+// returns null if invalid input
+psscli_cmd *parse_raw(psscli_cmd *cmd) {
+	char b[1024];
 
-	fprintf(stderr, "ws callback: reason: %d\tws: %p\n", reason, wsi);
-	switch (reason) {
-		case LWS_CALLBACK_CLIENT_WRITEABLE:
-			fprintf(stderr, "read (%d) %d -> %d, %p / %p\n", pthread_self(), cmd_queue_next, cmd_queue_last, &cmd_queue_next, &cmd_queue_last);
-			// send all commands in the queue
-			while (cmd_queue_next != cmd_queue_last) {
-				cmd_queue_next++;
-				cmd_queue_next %= PSSCLI_SERVER_CMD_QUEUE_MAX;
-				if (psscli_ws_send(cmd_queue+cmd_queue_next)) {
-					cmd_queue_next--;
-					cmd_queue_next %= PSSCLI_SERVER_CMD_QUEUE_MAX;
-				}
-			}
+	switch (cmd->code) {
+		case PSSCLI_CMD_BASEADDR:
+			free(*(cmd->values));
+			return cmd;
 			break;
-		case LWS_CALLBACK_CLIENT_ESTABLISHED:
-			psscli_ws.connected = 1;
+		case PSSCLI_CMD_GETPUBLICKEY:
+			free(*(cmd->values));
+			return cmd;
 			break;
-		case LWS_CALLBACK_CLIENT_CONNECTION_ERROR:
-			lwsl_notice("err %d (thread %d)\n", reason, pthread_self());
-			raise(SIGHUP);
-			break;
-		case LWS_CALLBACK_CLOSED:
-			if (psscli_ws.pid > 0) {
-				raise(SIGHUP);
-			}
-			break;
-		case LWS_CALLBACK_GET_THREAD_ID:
-			lwsl_notice("pthread %d\n", pthread_self());
-			return pthread_self();
-			break;
-		case LWS_CALLBACK_CLIENT_RECEIVE:
-			lwsl_notice("part recv: %s\n", in);
-			psscli_response *res = response_queue+response_queue_last;
-			strcpy(res->content+res->length, in);
-			res->length += len;
+//		case PSSCLI_CMD_SETPEERPUBLICKEY:
+//			// keylen+key 132 bytes + topiclen+topic 10 bytes + addrlen 2 bytes = 144 bytes
+//			l = recv(s2, &b, 144, MSG_DONTWAIT);
+//
+//			// all fields have length prefixes. Get each one
+//			sl[0] = (short*)&b;
+//			if (!is_le()) {
+//				int16_rev(sl[0]);
+//			}
+//			sl[1] = (short*)&b[2+(*sl[0])];
+//			if (!is_le()) {
+//				int16_rev(sl[1]);
+//			}
+//			sl[2] = (short*)&b[4+(*sl[0])+(*sl[1])];
+//			if (!is_le()) {
+//				int16_rev(sl[2]);
+//			}
+//
+//			// check that we have enough data for required fields
+//			if (l < 144 || *sl[0] != 130 || *sl[1] != 8) {
+//				memset(&b, (char)PSSCLI_EINVAL, 1);
+//				errno = EPROTO;
+//				send(s2, &b, 1, 0);
+//				continue;
+//			}
+//			
+//			// allocate three vars for this command
+//			if (psscli_cmd_alloc(cmd, 3) == NULL) {
+//				memset(&b, (char)PSSCLI_EMEM, 1);
+//				errno = ENOMEM;
+//				send(s2, &b, 1, 0);
+//				continue;
+//			}
+//
+//			// allocate and set publickey
+//			*cmd->values = malloc(sizeof(char)*(*sl[0])+3);
+//			strcpy(*cmd->values, "0x");
+//			memcpy(*cmd->values+2, &b[2], *sl[0]);
+//			memset(*cmd->values+2+(*sl[0]), 0, 1);
+//
+//			// allocate and set topic
+//			*(cmd->values+1) = malloc(sizeof(char)*(*sl[1])+3);
+//			strcpy(*(cmd->values+1), "0x");
+//			memcpy(*(cmd->values+1)+2, &b[4+(*sl[0])], *sl[1]);
+//			memset(*(cmd->values+1)+2+(*sl[1]), 0, 1);
+//
+//			// if optional address is present, allocate, retrieve and set it
+//			if (*sl[2] > 0) {
+//				l = recv(s2, &b, *sl[2], MSG_DONTWAIT);
+//				*(cmd->values+2) = malloc(sizeof(char)*(*sl[2])+3);
+//				strcpy(*(cmd->values+2), "0x");
+//				memcpy(*(cmd->values+2)+2, &b, *sl[2]);
+//				memset(*(cmd->values+2)+2+(*sl[2]), 0, 1);
+//			}
+//
+//			// tell the outgoing queue handler about the new pending command
+//			b[0] = (unsigned char)PSSCLI_CMD_SETPEERPUBLICKEY;
+//			l = write(psscli_ws.notify[1], &b, 1);
+//
+//			// tell the client all is well
+//			send(s2, &n, 1, 0);
+//			break;
 
-			// rpc json terminates at newline, if we have it we can dispatch to handler 
-			t = in;
-			while (1) {
-				t = strchr(t, 0x7b);
-				if (t == 0x0) {
-					break;
-				}
-				t++;
-				res->id++;
-			}
-			t = in;
-			while (1) {
-				t = strchr(t, 0x7d);
-				if (t == 0x0) {
-					break;
-				}
-				t++;
-				res->id--;
-			}
-			if (!res->id) {
-			//if (*(char*)(in+len-1) == 0x0a) {
-				// null-terminate response string
-				*(res->content + res->length) = 0;
-				// tell handler this response can be operated on
-				res->status = PSSCLI_RESPONSE_STATUS_RECEIVED;
-				// initialize next response object in queue so the handler knows where to stop
-				response_queue_last++;
-				response_queue_last %= PSSCLI_SERVER_RESPONSE_QUEUE_MAX;
-				(response_queue+response_queue_last)->length = 0;
-				(response_queue+response_queue_last)->done = 0;
-				lwsl_notice("recv done (queue: %p\tlast: %d\tnext: %d): %s\n", response_queue, response_queue_last, response_queue_next, res->content);
-			}
-			break;
-		case 71:
-			fprintf(stderr, "foo");
-			break;
 		default:
-			lwsl_notice("%d\n", reason);
+			psscli_cmd_free(cmd);	
+			return NULL;
 	}
-	return 0;
 }
-
-
-void psscli_server_sigint_(int s) {
-	psscli_server_stop();
-	close(s);
-	sa_parent.sa_handler(SIGINT);
-}
-
-int psscli_server_load_queue() {
-	return 0;
-}
-
-int psscli_server_init(int mode) {
+// thread handling a single socket connection. Adds received commands to the commands queue
+static void *process_input(void *arg) {
+	int id;
 	int r;
-	int lcmd;
-	int lresp;
-	int fd;
-	int fd_perm;
+	int c;
+	int i;
+	int lsd;
+	char b[PSSCLI_SERVER_SOCK_BUFFERSIZE];
+	psscli_cmd *cmd;
 
-	lcmd = PSSCLI_SERVER_CMD_QUEUE_MAX * (PSSCLI_SERVER_CMD_ITEM_MAX + sizeof(psscli_cmd));
-	lresp = PSSCLI_SERVER_RESPONSE_QUEUE_MAX * sizeof(psscli_response);
+	pthread_rwlock_rdlock(&pt_rw);
+	memcpy(&id, (int*)arg, sizeof(int));
+	lsd = sdlist[id];
+	fprintf(stderr, "enter cmd process on %d\n", lsd);
 
-	fd_perm = S_IRUSR | S_IWUSR | S_IRGRP | S_IWOTH;
+	pthread_rwlock_unlock(&pt_rw);
 
-	if (mode == PSSCLI_SERVER_MODE_DAEMON) {
-		fd = open(PSSCLI_SERVER_CMD_SHM_PATH, O_CREAT | O_TRUNC, fd_perm);
-		if (fd == -1) {
-			fprintf(stderr, "shm cmd file create failed: %d\n", errno);
-			raise(SIGINT);
-			return 1;
+	while (psscli_running()) {
+		if ((c = recv(lsd, &b, PSSCLI_SERVER_SOCK_BUFFERSIZE, 0)) <= 0) {
+			fprintf(stderr, "input error on %d (%d)\n", lsd, errno);
+			shutdown(lsd, SHUT_RDWR);
+			close(sdlist[id]);
+			break;
 		}
-		close(fd);
-	}
-	cmd_queue_shm_key = ftok(PSSCLI_SERVER_CMD_SHM_PATH, PSSCLI_SERVER_SHM_PROJ);
-	if (cmd_queue_shm_key == -1) {
-		fprintf(stderr, "shm cmd failed: %d\n", errno);
-		raise(SIGINT);
-		return 1;
-	}
-	cmd_queue_shm_id = shmget(cmd_queue_shm_key, lcmd, 0644 | IPC_CREAT);
-	if (cmd_queue_shm_id == -1) {
-		fprintf(stderr, "shmget cmd failed: %d\n", errno);
-		raise(SIGINT);
-		return 1;
-	}
-	cmd_queue = shmat(cmd_queue_shm_id, (void*)0, 0);
-	if (cmd_queue == (void*)-1) {
-		fprintf(stderr, "shmat cmd failed: %d\n", errno);
-		raise(SIGINT);
-		return 1;
-	}
 
-	if (mode == PSSCLI_SERVER_MODE_DAEMON) {	
-		fd = open(PSSCLI_SERVER_RESPONSE_SHM_PATH, O_CREAT | O_TRUNC, fd_perm);
-		if (fd == -1) {
-			fprintf(stderr, "shm response file create failed: %d\n", errno);
-			raise(SIGINT);
-			return 1;
+		fprintf(stderr, "server got: ");
+		for (i = 0; i < c; i++) {
+			fprintf(stderr, "%02x", b[i]);
 		}
-		close(fd);
-	}
-	response_queue_shm_key = ftok(PSSCLI_SERVER_RESPONSE_SHM_PATH, PSSCLI_SERVER_SHM_PROJ);
-	if (response_queue_shm_key == -1) {
-		fprintf(stderr, "shm cmd failed: %d\n", errno);
-		raise(SIGINT);
-		return 1;
-	}
-	response_queue_shm_id = shmget(response_queue_shm_key, lresp, 0640 | IPC_CREAT);
-	if (response_queue_shm_id == -1) {
-		fprintf(stderr, "shmget response failed: %d\n", errno);
-		raise(SIGINT);
-		return 1;
-	}
-	response_queue = shmat(response_queue_shm_id, (void*)0, 0);
-	if (response_queue == (void*)-1) {
-		fprintf(stderr, "shmat response failed: %d\n", errno);
-		raise(SIGINT);
-		return 1;
+		fprintf(stderr, "\n");
+
+		cmd = malloc(sizeof(psscli_cmd));
+		psscli_cmd_alloc(cmd, 1);
+		*(cmd->values) = malloc(sizeof(unsigned char)*(c-1));
+
+		cmd->code = (unsigned char)*b;
+		cmd->id = cursor;
+		memcpy(*(cmd->values), b+1, c-1);
+	
+		cmd = parse_raw(cmd);
+		if (cmd == NULL) {
+			psscli_cmd_free(cmd);
+			fprintf(stderr, "parse error on data from %d (%d)\n", lsd);
+			shutdown(lsd, SHUT_RDWR);
+			close(sdlist[id]);
+			return NULL;
+		}
+
+		pthread_rwlock_wrlock(&pt_rw);
+		if (psscli_cmd_queue_add(cmd) == -1) {
+			shutdown(sdlist[id], SHUT_RDWR);
+			fprintf(stderr, "cmd queue add fail, id %d\n", cmd->id);
+		} 
+		idlist[cmd->id] = id; // now the cmd->id contains the ws seq id
+		pthread_cond_signal(&pt_cond_write);
 	}
 
-	cmd_queue_last = 0;
-	cmd_queue_next = 0;
-	response_queue_last = 0;
-	response_queue_next = 0;
-	memset(cmd_queue, 0, lcmd);
-	memset(response_queue, 0, lresp);
-	fprintf(stderr, "initialized server (cmd_queue: %p\tresponse_queue: %p\n", cmd_queue, response_queue);
-	return 0;
-
+	pthread_rwlock_unlock(&pt_rw);
+	free(cmd);
+	pthread_exit(NULL);
+	return NULL;
 }
 
-int psscli_server_stop() {
-	shmdt(cmd_queue);
-	shmdt(response_queue);
+// when triggered polls the response queue and relays ready replies to the respective socket
+void *process_reply(void *arg) {
+	int r;
+	int c;
+	int lsd;
+	psscli_response response;
+	psscli_response *p;
+
+	pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
+
+	fprintf(stderr, "starting process reply thread\n");
+	while (psscli_running()) {
+		pthread_mutex_lock(&pt_lock_queue);
+		pthread_cond_wait(&pt_cond_reply, &pt_lock_queue);
+		if (!run) {
+			fprintf(stderr, "reply process thread exiting\n");
+			break;
+		}
+		p = psscli_response_queue_next();
+		if (p == NULL) {
+			pthread_mutex_unlock(&pt_lock_queue);
+			continue;
+		}
+		memcpy(&response, p, sizeof(psscli_response));
+		lsd = sdlist[idlist[response.id]];
+		pthread_mutex_unlock(&pt_lock_queue);
+		fprintf(stderr, "got response id %d: %s\n", response.id, response.content);
+
+		if ((c = send(lsd, response.content, response.length, 0)) <= 0) {
+			fprintf(stderr, "failed reply socket send on %d (%d)\n", lsd, errno);
+			continue;
+		}
+	}
+
+	pthread_exit(NULL);
+	return NULL;
 }
 
-/***
- *
- * \todo issue warning if queue is full
- * \todo fail if already started
- */
 int psscli_server_start() {
-	unsigned int s2;
-	struct sockaddr_un sl, sr;
 	int l;
+	unsigned int sd2;
+	struct sockaddr_un sl, sr;
+	int idxlist[PSSCLI_SERVER_SOCK_MAX]; // indices for socket descriptor for copy to process input 
+
 	struct stat fstat;
-	char buf[PSSCLI_SERVER_SOCKET_BUFFER_SIZE];
-	char t;
-	struct sigaction sa;
 
-	sa.sa_handler = psscli_server_sigint_;
-	sa.sa_flags = 0;
-	sigemptyset(&sa.sa_mask);
-	sigaction(SIGINT, &sa, &sa_parent);
+	run = 0;
 
-	if (!stat(conf.sock, &fstat)) {
+	if(!stat(conf.sock, &fstat)) {
 		unlink(conf.sock);
 	}
-	if ((s = socket(AF_UNIX, SOCK_STREAM, 0)) == -1) {
-		sprintf(psscli_error_string, "socket create %s: %d", conf.sock, errno);
-		return PSSCLI_SOCKET;
+	if ((sd = socket(AF_UNIX, SOCK_STREAM, 0)) == -1) {
+		sprintf(psscli_error_string, "socket create (%d): %s", errno, conf.sock);
+		return PSSCLI_ESOCK;
 	}
 
 	sl.sun_family = AF_UNIX;
 	strcpy(sl.sun_path, conf.sock);
 	l = strlen(sl.sun_path) + sizeof(sl.sun_family);
-	if (bind(s, (struct sockaddr*)&sl, l)) {
+	if (bind(sd, (struct sockaddr*)&sl, l)) {
 		sprintf(psscli_error_string, "socket bind on %s: %d", conf.sock, errno);
-		return PSSCLI_SOCKET;
+		return PSSCLI_ESOCK;
 	}
 
-	listen(s, 5);
+	listen(sd, 5);
 
-	psscli_server_load_queue();
+	run = 1;
+	pthread_create(&pt_reply, NULL, process_reply, NULL);
 
-	while (psscli_ws.pid) {
-		int n;
-		short *sl[4];
-		psscli_cmd *cmd;
+	l = sizeof(struct sockaddr_un);
+	while (sd2 = accept(sd, (struct sockaddr*)&sr, &l)) {
+		int r;
+		if (!psscli_running()) {
+			break;
+		}
+		pthread_rwlock_rdlock(&pt_rw);
+		sdlist[cursor] = sd2;
+		idxlist[cursor] = cursor;
+		pthread_rwlock_unlock(&pt_rw);
 
-		l = sizeof(struct sockaddr_un);
-		s2 = accept(s, (struct sockaddr*)&sr, &l);
-
-		while (l = recv(s2, &buf, 1, 0) > 0) {
-			int m;
-			char *p;
-
-			// next in queue
-			n = cmd_queue_last + 1;
-			n %= PSSCLI_SERVER_CMD_QUEUE_MAX;
-
-			// noop if queue is full
-			if (n == cmd_queue_next) {
-				n = (unsigned char)PSSCLI_EFULL;
-				send(s2, &n, 1, 0); // -1 = queue full
-				continue;
-			}
-			cmd_queue_last = n;
-			n *= -1;
-	
-			// retrieve the command and decide action	
-			cmd = cmd_queue+cmd_queue_last;
-			psscli_cmd_free(cmd);
-
-			p = (unsigned char*)&buf;
-			cmd->code = *p;
-			cmd->id = *(p+1);
-
-			fprintf(stderr, "write (%d) %d -> %d, %p / %p\n", pthread_self(), cmd_queue_next, cmd_queue_last, &cmd_queue_next, &cmd_queue_last);
-
-			switch (cmd->code) {
-				case PSSCLI_CMD_BASEADDR:
-					buf[1] = n;
-					l = write(psscli_ws.notify[1], &buf, 2);
-					if (l < 0) {
-						raise(SIGINT);
-					}
-					send(s2, &n, 1, 0);
-					break;
-				case PSSCLI_CMD_GETPUBLICKEY:
-					buf[1] = n;
-					l = write(psscli_ws.notify[1], &buf, 2);
-					if (l < 0) {
-						raise(SIGINT);
-					}
-					send(s2, &n, 1, 0);
-					break;
-				case PSSCLI_CMD_SETPEERPUBLICKEY:
-					// keylen+key 132 bytes + topiclen+topic 10 bytes + addrlen 2 bytes = 144 bytes
-					l = recv(s2, &buf, 144, MSG_DONTWAIT);
-
-					// all fields have length prefixes. Get each one
-					sl[0] = (short*)&buf;
-					if (!is_le()) {
-						int16_rev(sl[0]);
-					}
-					sl[1] = (short*)&buf[2+(*sl[0])];
-					if (!is_le()) {
-						int16_rev(sl[1]);
-					}
-					sl[2] = (short*)&buf[4+(*sl[0])+(*sl[1])];
-					if (!is_le()) {
-						int16_rev(sl[2]);
-					}
-
-					// check that we have enough data for required fields
-					if (l < 144 || *sl[0] != 130 || *sl[1] != 8) {
-						memset(&buf, (char)PSSCLI_EINVAL, 1);
-						errno = EPROTO;
-						send(s2, &buf, 1, 0);
-						continue;
-					}
-					
-					// allocate three vars for this command
-					if (psscli_cmd_alloc(cmd, 3) == NULL) {
-						memset(&buf, (char)PSSCLI_EMEM, 1);
-						errno = ENOMEM;
-						send(s2, &buf, 1, 0);
-						continue;
-					}
-
-					// allocate and set publickey
-					*cmd->values = malloc(sizeof(char)*(*sl[0])+3);
-					strcpy(*cmd->values, "0x");
-					memcpy(*cmd->values+2, &buf[2], *sl[0]);
-					memset(*cmd->values+2+(*sl[0]), 0, 1);
-
-					// allocate and set topic
-					*(cmd->values+1) = malloc(sizeof(char)*(*sl[1])+3);
-					strcpy(*(cmd->values+1), "0x");
-					memcpy(*(cmd->values+1)+2, &buf[4+(*sl[0])], *sl[1]);
-					memset(*(cmd->values+1)+2+(*sl[1]), 0, 1);
-
-					// if optional address is present, allocate, retrieve and set it
-					if (*sl[2] > 0) {
-						l = recv(s2, &buf, *sl[2], MSG_DONTWAIT);
-						*(cmd->values+2) = malloc(sizeof(char)*(*sl[2])+3);
-						strcpy(*(cmd->values+2), "0x");
-						memcpy(*(cmd->values+2)+2, &buf, *sl[2]);
-						memset(*(cmd->values+2)+2+(*sl[2]), 0, 1);
-					}
-
-					// tell the outgoing queue handler about the new pending command
-					buf[0] = (unsigned char)PSSCLI_CMD_SETPEERPUBLICKEY;
-					l = write(psscli_ws.notify[1], &buf, 1);
-
-					// tell the client all is well
-					send(s2, &n, 1, 0);
-					break;
-
-				default:
-					printf("foo\n");
-					cmd_queue_last--;
-					cmd_queue_last %= PSSCLI_SERVER_CMD_QUEUE_MAX;
+		fprintf(stderr, "sock connect %d\n", sd2);
+		
+		if (pthread_create(&pt_cmd[cursor], NULL, process_input, (void*)&idxlist[cursor])) { 
+			r = PSSCLI_ESYNC;
+			sprintf(psscli_error_string, "failed to start input processing thread (%d)\n", errno);
+			if (send(sd2, (unsigned char*)&r, 1, 0) == -1) {
+				sprintf(psscli_error_string, "socket write fail (input processing) on %d (%d)\n", sd2, errno);
 			}
 		}
+		cursor++;
 	}
 
-	return 0;
+	run = 0;
 
+	close(sd);
+	return PSSCLI_EOK;
 }
 
-/***
- * \todo shared memory for response queue cursors
- */	
-int psscli_server_shift(psscli_response *r) {
-	printf("checking shift (queue: %p\tlast: %d\tnext: %d\n", response_queue, response_queue_last, response_queue_next);
-	if (response_queue_last == response_queue_next) {
-		return 1;
+void psscli_server_stop() {
+	pthread_cancel(pt_reply);
+	pthread_cond_signal(&pt_cond_reply);
+	if (shutdown(sd, SHUT_RDWR)) {
+		fprintf(stderr, "failed socket shutdown: %d\n", errno);
 	}
-	memcpy(r, response_queue+response_queue_next, sizeof(psscli_response));
-	response_queue_next++;
-	response_queue_next %= PSSCLI_SERVER_RESPONSE_QUEUE_MAX;
-	return 0;
+	close(sd);
+	return;
 }

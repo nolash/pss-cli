@@ -1,6 +1,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <unistd.h>
+#include <error.h>
 
 #include "config.h"
 #include "server.h"
@@ -8,13 +9,11 @@
 
 extern struct psscli_config conf;
 
-int *psscli_config_init() {
+void psscli_config_init() {
 	memset(&conf, 0, sizeof(conf));
-	//memset(conf, 0, sizeof(psscli_config));
 	strcpy(conf.host, PSSCLI_WS_DEFAULT_HOST);
 	conf.port = PSSCLI_WS_DEFAULT_PORT;
-	strcpy(conf.sock, PSSCLI_SERVER_SOCKET_PATH);
-	return 0;
+	strcpy(conf.sock, PSSCLI_SERVER_SOCK_PATH);
 }
 
 int psscli_config_parse(int c, char **v, int errLen, char *zErr) {
@@ -29,7 +28,11 @@ int psscli_config_parse(int c, char **v, int errLen, char *zErr) {
 				strcpy(conf.host, optarg);
 				break;
 			case 'p':
-				conf.port = (unsigned short)atoi(optarg);
+				conf.port = strtol(optarg, NULL, 10);
+				if (errno) {
+					strcpy(zErr, "invalid port");
+					return 1;
+				}
 				break;
 			case 's':
 				strcpy(conf.sock, optarg);

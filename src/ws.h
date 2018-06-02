@@ -33,8 +33,21 @@ struct psscli_ws_ {
 typedef int(*psscli_ws_callback)(struct lws *wsi, enum lws_callback_reasons reason, void *user, void *in, size_t len);
 
 int psscli_ws_init(psscli_ws_callback callback, const char *version);
-int psscli_ws_connect();
-void psscli_ws_free();
+
+/***
+ * \short connects to websocket on swarm (pss) node
+ * \description polls for servicing the websocket and reads from command unix socket pipe every turn
+ * \todo retry loop on connect fail
+ */ 
+int psscli_ws_start();
+void psscli_ws_stop();
+int psscli_ws_ready();
+
+/***
+ * \short send command on websocket
+ * \description converts command structure to json rpc and sends to websocket. Called from callback when websocket is writable
+ * \todo fail handling
+ */
 int psscli_ws_send(psscli_cmd *cmd);
 
 #endif // PSSCLI_WS_H_
