@@ -12,6 +12,10 @@ extern pthread_mutex_t pt_lock_state;
 extern pthread_mutex_t pt_lock_queue;
 extern psscli_cmd psscli_cmd_current;
 
+int json_response_parse(psscli_response *response);
+
+int result_count;
+
 // connection
 void *connect_thread(void *args) {
 	psscli_ws_connect();
@@ -50,11 +54,6 @@ int send_proto(struct lws *wsi, enum lws_callback_reasons reason, void *user, vo
 		case LWS_CALLBACK_CLIENT_WRITEABLE:
 			pthread_mutex_lock(&pt_lock_state);
 			fprintf(stderr, "got data %d %p\n", psscli_cmd_current.id, user);
-			if (psscli_cmd_current.id == 44) {
-				psscli_ws.pid = 0;
-			} else {
-				pthread_cond_signal(&pt_cond_write);
-			}
 			psscli_cmd_alloc(&lcmd, psscli_cmd_current.valuecount);
 			psscli_cmd_copy(&lcmd, &psscli_cmd_current);
 			pthread_mutex_unlock(&pt_lock_state);
@@ -71,6 +70,13 @@ int send_proto(struct lws *wsi, enum lws_callback_reasons reason, void *user, vo
 			fprintf(stderr, "connection error\n");
 			psscli_ws.pid = 0;
 			break;
+		case LWS_CALLBACK_CLIENT_RECEIVE:
+			fprintf(stderr, "recv packet: %s\n", in);
+			pthread_cond_signal(&pt_cond_write);
+			if (++result_count == 3) {
+				psscli_ws.pid = 0;
+			}
+			break;
 	}
 	return 0;
 
@@ -83,7 +89,7 @@ int recv_proto(struct lws *wsi, enum lws_callback_reasons reason, void *user, vo
 	int r;
 	char *t;
 	psscli_cmd lcmd;
-	psscli_response lresp;
+	psscli_response *response_result;
 
 	switch (reason) {
 		case LWS_CALLBACK_CLIENT_WRITEABLE:
@@ -130,26 +136,19 @@ int recv_proto(struct lws *wsi, enum lws_callback_reasons reason, void *user, vo
 				t++;
 				psscli_response_current.id--;
 			}
-			memcpy(&lresp, &psscli_response_current, sizeof(psscli_response));
 			pthread_mutex_unlock(&pt_lock_state);
-			if (!lresp.id) {
-//			//if (*(char*)(in+len-1) == 0x0a) {
-//				// null-terminate response string
-//				*(res->content + res->length) = 0;
-//				// tell handler this response can be operated on
-//				res->status = PSSCLI_RESPONSE_STATUS_RECEIVED;
-//				// initialize next response object in queue so the handler knows where to stop
-//				response_queue_last++;
-//				response_queue_last %= PSSCLI_SERVER_RESPONSE_QUEUE_MAX;
-//				(response_queue+response_queue_last)->length = 0;
-//				(response_queue+response_queue_last)->done = 0;
-//				lwsl_notice("recv done (queue: %p\tlast: %d\tnext: %d): %s\n", response_queue, response_queue_last, response_queue_next, res->content);
-				fprintf(stderr, "received response: %s\n", lresp.content);
-				pthread_mutex_lock(&pt_lock_state);
-				psscli_ws.pid = 0;
-				pthread_mutex_unlock(&pt_lock_state);
-				pthread_cond_signal(&pt_cond_parse);
-				pthread_cond_signal(&pt_cond_write);
+			if (!psscli_response_current.id) {
+				response_result = malloc(sizeof(psscli_response));
+				memcpy(response_result, &psscli_response_current, sizeof(psscli_response));
+				fprintf(stderr, "received response: %s\n", response_result->content);
+				response_result->status = PSSCLI_RESPONSE_STATUS_RECEIVED;
+				pthread_mutex_lock(&pt_lock_queue);
+				if (psscli_response_queue_add(response_result) == -1) {
+					fprintf(stderr, "failed to add to queue\n");
+					return 1;
+				}
+				pthread_mutex_unlock(&pt_lock_queue);
+				psscli_response_current.status = PSSCLI_RESPONSE_STATUS_NONE;
 			}
 			break;
 
@@ -182,6 +181,7 @@ int test_send() {
 	struct timespec ts;
 	psscli_cmd cmd[3];
 
+	result_count = 0;
 	psscli_queue_start(3, 3);
 	if (psscli_ws_init(send_proto, "2.0")) {
 		return 1;
@@ -189,6 +189,10 @@ int test_send() {
 	if (r = pthread_create(&pt_main, NULL, connect_thread, NULL)) {
 		return 2;
 	}
+
+	// timeout for polling read/write ready
+	ts.tv_sec = 0;
+	ts.tv_nsec = 500000000L;
 
 	// create three messages and add them to the queue
 	for (i = 0; i < 3; i++) {
@@ -200,20 +204,18 @@ int test_send() {
 			pthread_mutex_unlock(&pt_lock_queue);
 			for (j = i; j >= 0; j--) {
 				psscli_cmd_free(&cmd[j]);
-			} 			psscli_ws.pid = 0;
+			} 
+			psscli_ws.pid = 0;
 			fprintf(stderr, "add cmd fail on index %d\n", i);
 			return 3;
 		} 
 		pthread_mutex_unlock(&pt_lock_queue);
 	}
+
 	pthread_mutex_unlock(&pt_lock_queue);
-
-	// timeout for polling read/write ready
-	ts.tv_sec = 0;
-	ts.tv_nsec = 50000000;
-
 	// wait until websocket is connected
 	while (!psscli_ws.connected) {
+		fprintf(stderr, "wait for connect\n");
 		nanosleep(&ts, NULL);
 	}
 
@@ -236,6 +238,7 @@ int test_recv() {
 	int r;
 	struct timespec ts;
 	psscli_cmd cmd;
+	psscli_response *resp;
 
 	psscli_queue_start(3, 3);
 	if (psscli_ws_init(recv_proto, "2.0")) {
@@ -273,6 +276,36 @@ int test_recv() {
 	fprintf(stderr, "signalling writeloop\n");
 	pthread_cond_signal(&pt_cond_write);
 	
+	// timeout for polling read/write ready
+	ts.tv_sec = 0;
+	ts.tv_nsec = 500000000L;
+
+	// check for the response
+	while (1) {
+		nanosleep(&ts, NULL);
+		fprintf(stderr, "waiting for message received\n");
+		resp = psscli_response_queue_next();
+		if (resp == NULL) {
+			continue;
+		}
+		if (resp->status != PSSCLI_RESPONSE_STATUS_RECEIVED) {
+			fprintf(stderr, "wrong status: %d\n", resp->status);
+			free(resp);
+			break;	
+		}
+		if (json_response_parse(resp)) {
+			fprintf(stderr, "parse response error!");
+		}
+		fprintf(stderr, "got message: %s\n", resp->content);
+		free(resp);
+		break;
+	}
+	pthread_mutex_lock(&pt_lock_state);
+	psscli_ws.pid = 0;
+	pthread_mutex_unlock(&pt_lock_state);
+	pthread_cond_signal(&pt_cond_parse);
+	pthread_cond_signal(&pt_cond_write);
+
 	pthread_join(pt_main, NULL);
 	psscli_queue_stop();
 	psscli_ws_free();
@@ -284,15 +317,14 @@ int main() {
 	psscli_ws.port = 8546;
 	psscli_ws.ssl = 0;
 
-//	if (test_disconnect()) {
-//		return 1;	
-//	}
-//	if (test_send()) {
-//		return 2;
-//	}
+	if (test_disconnect()) {
+		return 1;	
+	}
+	if (test_send()) {
+		return 2;
+	}
 	if (test_recv()) {
 		return 3;
 	}
-
 	return 0;
 }

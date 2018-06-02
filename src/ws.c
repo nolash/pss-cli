@@ -211,6 +211,7 @@ int psscli_ws_connect() {
 		fprintf(stderr, "poll ws\n");
 		lws_service(psscli_ws.ctx, PSSCLI_WS_LOOP_TIMEOUT);
 	}
+	psscli_ws.connected = 0;	
 	pthread_cond_signal(&pt_cond_write);
 	pthread_cond_signal(&pt_cond_parse);
 	pthread_join(pt_write, NULL);
