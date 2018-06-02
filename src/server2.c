@@ -36,6 +36,88 @@ int psscli_server_status() {
 	return PSSCLI_SERVER_STATUS_RUNNING;
 }
 
+// handle socket input command
+// returns null if invalid input
+psscli_cmd *parse_raw(psscli_cmd *cmd) {
+	char b[1024];
+
+	switch (cmd->code) {
+		case PSSCLI_CMD_BASEADDR:
+			free(*(cmd->values));
+			return cmd;
+			break;
+		case PSSCLI_CMD_GETPUBLICKEY:
+			free(*(cmd->values));
+			return cmd;
+			break;
+//		case PSSCLI_CMD_SETPEERPUBLICKEY:
+//			// keylen+key 132 bytes + topiclen+topic 10 bytes + addrlen 2 bytes = 144 bytes
+//			l = recv(s2, &b, 144, MSG_DONTWAIT);
+//
+//			// all fields have length prefixes. Get each one
+//			sl[0] = (short*)&b;
+//			if (!is_le()) {
+//				int16_rev(sl[0]);
+//			}
+//			sl[1] = (short*)&b[2+(*sl[0])];
+//			if (!is_le()) {
+//				int16_rev(sl[1]);
+//			}
+//			sl[2] = (short*)&b[4+(*sl[0])+(*sl[1])];
+//			if (!is_le()) {
+//				int16_rev(sl[2]);
+//			}
+//
+//			// check that we have enough data for required fields
+//			if (l < 144 || *sl[0] != 130 || *sl[1] != 8) {
+//				memset(&b, (char)PSSCLI_EINVAL, 1);
+//				errno = EPROTO;
+//				send(s2, &b, 1, 0);
+//				continue;
+//			}
+//			
+//			// allocate three vars for this command
+//			if (psscli_cmd_alloc(cmd, 3) == NULL) {
+//				memset(&b, (char)PSSCLI_EMEM, 1);
+//				errno = ENOMEM;
+//				send(s2, &b, 1, 0);
+//				continue;
+//			}
+//
+//			// allocate and set publickey
+//			*cmd->values = malloc(sizeof(char)*(*sl[0])+3);
+//			strcpy(*cmd->values, "0x");
+//			memcpy(*cmd->values+2, &b[2], *sl[0]);
+//			memset(*cmd->values+2+(*sl[0]), 0, 1);
+//
+//			// allocate and set topic
+//			*(cmd->values+1) = malloc(sizeof(char)*(*sl[1])+3);
+//			strcpy(*(cmd->values+1), "0x");
+//			memcpy(*(cmd->values+1)+2, &b[4+(*sl[0])], *sl[1]);
+//			memset(*(cmd->values+1)+2+(*sl[1]), 0, 1);
+//
+//			// if optional address is present, allocate, retrieve and set it
+//			if (*sl[2] > 0) {
+//				l = recv(s2, &b, *sl[2], MSG_DONTWAIT);
+//				*(cmd->values+2) = malloc(sizeof(char)*(*sl[2])+3);
+//				strcpy(*(cmd->values+2), "0x");
+//				memcpy(*(cmd->values+2)+2, &b, *sl[2]);
+//				memset(*(cmd->values+2)+2+(*sl[2]), 0, 1);
+//			}
+//
+//			// tell the outgoing queue handler about the new pending command
+//			b[0] = (unsigned char)PSSCLI_CMD_SETPEERPUBLICKEY;
+//			l = write(psscli_ws.notify[1], &b, 1);
+//
+//			// tell the client all is well
+//			send(s2, &n, 1, 0);
+//			break;
+
+		default:
+			psscli_cmd_free(cmd);	
+			return NULL;
+	}
+}
 // thread handling a single socket connection. Adds received commands to the commands queue
 static void *process_input(void *arg) {
 	int id;
@@ -78,9 +160,15 @@ static void *process_input(void *arg) {
 		cmd->code = (unsigned char)*b;
 		cmd->id = cursor;
 		memcpy(*(cmd->values), b+1, c-1);
-		
-		fprintf(stderr, "process input at %p: %s\n", (cmd->values), *(cmd->values));
-		free(*(cmd->values));
+	
+		cmd = parse_raw(cmd);
+		if (cmd == NULL) {
+			psscli_cmd_free(cmd);
+			fprintf(stderr, "parse error on data from %d (%d)\n", lsd);
+			shutdown(lsd, SHUT_RDWR);
+			close(sdlist[id]);
+			return NULL;
+		}
 
 		pthread_rwlock_wrlock(&pt_rw);
 		if (psscli_cmd_queue_add(cmd) == -1) {

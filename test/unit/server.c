@@ -100,6 +100,7 @@ int test_sock() {
 
 	b[c] = 0;
 	fprintf(stderr, "recv 1: %s\n", b);
+	psscli_cmd_free(cmd);
 
 	b[0] = PSSCLI_CMD_BASEADDR;
 	strcpy(b+1, "bar");
@@ -143,6 +144,7 @@ int test_sock() {
 
 	b[c] = 0;
 	fprintf(stderr, "recv 2: %s\n", b);
+	psscli_cmd_free(cmd);
 
 	close(sd);
 	psscli_server_stop();
