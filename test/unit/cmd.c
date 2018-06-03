@@ -59,7 +59,7 @@ int test_cmd_queue() {
 	psscli_cmd *cmdptrs[2];
 	psscli_cmd *p;
 
-	if (psscli_queue_start(2, 2)) {
+	if (psscli_queue_start(2)) {
 		return 1;	
 	}
 
@@ -69,21 +69,21 @@ int test_cmd_queue() {
 	cmds[1].code = PSSCLI_CMD_GETPUBLICKEY;
 	cmdptrs[0] = &cmds[0];
 	cmdptrs[1] = &cmds[1];
-	if (psscli_cmd_queue_add(cmdptrs[0])) {
+	if (psscli_cmd_queue_add(PSSCLI_QUEUE_OUT, cmdptrs[0])) {
 		return 2;
 	}
-	if (psscli_cmd_queue_add(cmdptrs[1])) {
+	if (psscli_cmd_queue_add(PSSCLI_QUEUE_OUT, cmdptrs[1])) {
 		return 3;
 	}
-	p = psscli_cmd_queue_peek();
+	p = psscli_cmd_queue_peek(PSSCLI_QUEUE_OUT);
 	if (p != cmdptrs[0]) {
 		return 4;
 	} 
-	p = psscli_cmd_queue_next();
+	p = psscli_cmd_queue_next(PSSCLI_QUEUE_OUT);
 	if (p != cmdptrs[0]) {
 		return 5;
 	}
-	p = psscli_cmd_queue_peek();
+	p = psscli_cmd_queue_peek(PSSCLI_QUEUE_OUT);
 	if (p != cmdptrs[1]) {
 		return 6;
 	} 
@@ -96,52 +96,12 @@ int test_cmd_queue() {
 	return 0;	
 }
 
-// test insert and retireval of response queue elements
-int test_response_queue() {
-	int i;
-	psscli_response resp[2];
-	psscli_response *respptr[2];
-	psscli_response *p;
-
-	psscli_queue_start(2, 2);
-
-	resp[0].id = 13;
-	resp[1].id = 42;
-	respptr[0] = resp;	
-	respptr[1] = resp+1;	
-
-	if (psscli_response_queue_add(respptr[0])) {
-		return 1;
-	}
-	if (psscli_response_queue_add(respptr[1])) {
-		return 2;
-	}
-	p = psscli_response_queue_peek();
-	if (p != respptr[0]) {
-		return 3;
-	}
-	p = psscli_response_queue_next();
-	if (p != respptr[0]) {
-		return 4;
-	}
-	p = psscli_response_queue_peek();
-	if (p != respptr[1]) {
-		return 5;
-	}
-
-	psscli_queue_stop();
-	return 0;
-}
-
 int main() {
 	if (test_copy()) {
 		return 1;
 	}
 	if (test_cmd_queue()) {
 		return 2;
-	}
-	if (test_response_queue()) {
-		return 3;
 	}
 	return 0;
 }

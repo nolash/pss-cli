@@ -3,22 +3,22 @@
 
 #define PSSCLI_CMD_RESPONSE_MAX 4096+256
 
-#define PSSCLI_CMD_QUEUE_MAX 64
-#define PSSCLI_RESPONSE_QUEUE_MAX 64
+#define	PSSCLI_QUEUE_OUT 0
+#define	PSSCLI_QUEUE_X 1
+#define	PSSCLI_QUEUE_IN 2
 
-#define PSSCLI_RESPONSE_STATUS_NONE 0
-#define PSSCLI_RESPONSE_STATUS_PENDING 1
-#define PSSCLI_RESPONSE_STATUS_RECEIVED 2
-#define PSSCLI_RESPONSE_STATUS_PARSED 3
-#define PSSCLI_RESPONSE_STATUS_INVALID 4
+#define PSSCLI_QUEUE_MAX 64
 
-#define PSSCLI_CMD_STATUS_NONE 0
-#define PSSCLI_CMD_STATUS_PENDING 1
-#define PSSCLI_CMD_STATUS_SENT 2
+// bitwise
+#define PSSCLI_STATUS_LOCAL 1 // if message originated locally
+#define PSSCLI_STATUS_VALID 2 // if message has been parsed successfully
+#define PSSCLI_STATUS_TX 4 // if message has been transmitted
+#define PSSCLI_STATUS_DONE 128 // if message can be garbage collected
 
 
 enum psscli_cmd_code {
 	PSSCLI_CMD_NONE,
+	PSSCLI_CMD_MSG, // incoming message
 	PSSCLI_CMD_BASEADDR,
 	PSSCLI_CMD_GETPUBLICKEY,
 	PSSCLI_CMD_SETPEERPUBLICKEY
@@ -26,27 +26,27 @@ enum psscli_cmd_code {
 
 typedef struct psscli_cmd_ {
 	long int id;
-	int sd;
-	int *sdptr;
 	char status;
 	enum psscli_cmd_code code;
+	int sd;
+	int *sdptr;
 	char **values;
 	unsigned char valuecount;
 } psscli_cmd;
 
 psscli_cmd psscli_cmd_current;
-
-typedef struct psscli_response_ {
-	long int id;
-	int sd;
-	int *sdptr;
-	char status;
-	char content[PSSCLI_CMD_RESPONSE_MAX]; 
-	int length;
-} psscli_response;
-
-psscli_response psscli_response_current;
-
+//
+//typedef struct psscli_response_ {
+//	long int id;
+//	int sd;
+//	int *sdptr;
+//	char status;
+//	char content[PSSCLI_CMD_RESPONSE_MAX]; 
+//	int length;
+//} psscli_response;
+//
+//psscli_response psscli_response_current;
+//
 /***
  * \brief set up command queues
  *
@@ -56,7 +56,7 @@ psscli_response psscli_response_current;
  * \param responsesize queue size of responses
  * \return 0 on success, PSS_EMEM if queue allocations fail
  */
-int psscli_queue_start(short cmdsize, short responsesize);
+int psscli_queue_start(short size);
 
 /***
  * \brief release queue allocations. This must be called on shutdown if psscli_cmd_start() has been called
@@ -104,7 +104,7 @@ int psscli_cmd_copy(psscli_cmd *to, psscli_cmd *from);
  * \param cmd pointer to command to add
  * \return 0 on success, -1 if element couldn't be added
  */
-int psscli_cmd_queue_add(psscli_cmd *cmd);
+int psscli_cmd_queue_add(char qid, psscli_cmd *cmd);
 
 /***
  * \brief get next command in queue
@@ -113,17 +113,13 @@ int psscli_cmd_queue_add(psscli_cmd *cmd);
  *
  * \return pointer to cmd, NULL if there are none
  */
-psscli_cmd *psscli_cmd_queue_peek();
+psscli_cmd *psscli_cmd_queue_peek(char qid);
 
 /***
  * \brief advance the cmd queue pointer
  *
  * \return 0 on success. Will return PSSCLI_EBUSY if the current command is pending, or PSSCLI_ENONE if there is nothing to process in the queue
  */
-psscli_cmd *psscli_cmd_queue_next();
-
-int psscli_response_queue_add(psscli_response *response);
-psscli_response *psscli_response_queue_peek();
-psscli_response *psscli_response_queue_next();
+psscli_cmd *psscli_cmd_queue_next(char qid);
 
 #endif // PSSCLI_CMD_H_

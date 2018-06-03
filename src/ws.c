@@ -42,8 +42,8 @@ extern psscli_cmd psscli_cmd_current;
 // internal functions
 static int psscli_ws_write_(struct lws *ws, char *buf, int buflen, enum lws_write_protocol wp);
 static int running();
-PRIVATE int json_cmd_write(char *json_string, int json_string_len, psscli_cmd *cmd);
-PRIVATE int json_response_parse(psscli_response *response);
+PRIVATE int json_write(char *json_string, int json_string_len, psscli_cmd *cmd);
+PRIVATE int json_parse(psscli_cmd *cmd);
 json_object *j_version;
 void psscli_ws_connect_try_(int s);
 
@@ -97,8 +97,8 @@ int psscli_ws_init(psscli_ws_callback callback, const char *version) {
 	return 0;
 }
 
-static int parse(psscli_response *r) {
-	if (json_response_parse(r)) {
+static int parse(psscli_cmd *cmd) {
+	if (json_parse(cmd)) {
 		return 1;
 	}
 	return 0;
@@ -107,8 +107,8 @@ static int parse(psscli_response *r) {
 void *parse_loop(void *arg) {
 	int c;
 	int last;
-	psscli_response *p;
-	psscli_response response;
+	psscli_cmd *p;
+	psscli_cmd cmd;
 
 	//pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
 	fprintf(stderr, "entering parseloop\n");
@@ -123,18 +123,18 @@ void *parse_loop(void *arg) {
 		}
 		while(1) {
 			pthread_mutex_lock(&pt_lock_queue);
-			p = psscli_response_queue_peek();
+			p = psscli_cmd_queue_peek(PSSCLI_QUEUE_X);
 			if (p == NULL) {
 				pthread_mutex_unlock(&pt_lock_queue);
 				break;
 			}
-			memcpy(&response, p, sizeof(psscli_response));
+			psscli_cmd_copy(&cmd, p);
 			pthread_mutex_unlock(&pt_lock_queue);
-			if (parse(&response)) {
+			if (parse(&cmd)) {
 				break;
 			}
 			pthread_mutex_lock(&pt_lock_queue);
-			memcpy(p, &response, sizeof(psscli_response));
+			psscli_cmd_copy(p, &cmd);
 			pthread_mutex_unlock(&pt_lock_queue);
 			pthread_cond_signal(&pt_cond_reply);
 		}
@@ -161,7 +161,7 @@ void *write_loop(void *arg) {
 			break;
 		}
 		pthread_mutex_lock(&pt_lock_queue);
-		cmd = psscli_cmd_queue_next();
+		cmd = psscli_cmd_queue_next(PSSCLI_QUEUE_OUT);
 		if (cmd == NULL) {
 			pthread_mutex_unlock(&pt_lock_queue);
 			continue;
@@ -243,7 +243,7 @@ int psscli_ws_send(psscli_cmd *cmd) {
 	int r;
 	json_object *j;
 
-	r = json_cmd_write(in_buf + LWS_PRE, 1024 - LWS_PRE, cmd);
+	r = json_write(in_buf + LWS_PRE, 1024 - LWS_PRE, cmd);
 	if (r) {
 		return 2;
 	}
@@ -278,50 +278,50 @@ int psscli_ws_write_(struct lws *ws, char *buf, int buflen, enum lws_write_proto
 	return r;
 }
 
-int json_response_parse(psscli_response *response) {
+int json_parse(psscli_cmd *cmd) {
 	json_tokener *jt;
 	json_object *j;
 	json_object *jv;
 
-	if (response->status != PSSCLI_RESPONSE_STATUS_RECEIVED) {
-		return PSSCLI_ENODATA;
-	}
-
-	jt = json_tokener_new();
-	j = json_tokener_parse_ex(jt, response->content, response->length);
-	if (j == NULL) {
-		return PSSCLI_EINVAL;
-	}
-	json_tokener_free(jt);
-
-	if (!json_object_object_get_ex(j, "jsonrpc", &jv)) {
-		return PSSCLI_EINVAL;
-	} else if (strcmp(json_object_get_string(jv), json_object_get_string(j_version))) {
-		return PSSCLI_EINVAL;
-	}
-
-	if(!json_object_object_get_ex(j, "id", &jv)) {
-		response->status = PSSCLI_RESPONSE_STATUS_INVALID;
-		return PSSCLI_EINVAL;
-	}
-	response->id = strtol(json_object_get_string(jv), NULL, 10);
-	if (errno) {
-		response->status = PSSCLI_RESPONSE_STATUS_INVALID;
-		return PSSCLI_EINVAL;
-	}
-	if (!json_object_object_get_ex(j, "result", &jv)) {
-		response->status = PSSCLI_RESPONSE_STATUS_INVALID;
-		return PSSCLI_EINVAL;
-	}
-	strcpy(response->content, json_object_get_string(jv));
-	response->length = strlen(response->content);
+//	if (response->status != PSSCLI_RESPONSE_STATUS_RECEIVED) {
+//		return PSSCLI_ENODATA;
+//	}
+//
+//	jt = json_tokener_new();
+//	j = json_tokener_parse_ex(jt, cmd->content, response->length);
+//	if (j == NULL) {
+//		return PSSCLI_EINVAL;
+//	}
+//	json_tokener_free(jt);
+//
+//	if (!json_object_object_get_ex(j, "jsonrpc", &jv)) {
+//		return PSSCLI_EINVAL;
+//	} else if (strcmp(json_object_get_string(jv), json_object_get_string(j_version))) {
+//		return PSSCLI_EINVAL;
+//	}
+//
+//	if(!json_object_object_get_ex(j, "id", &jv)) {
+//		response->status = PSSCLI_RESPONSE_STATUS_INVALID;
+//		return PSSCLI_EINVAL;
+//	}
+//	response->id = strtol(json_object_get_string(jv), NULL, 10);
+//	if (errno) {
+//		response->status = PSSCLI_RESPONSE_STATUS_INVALID;
+//		return PSSCLI_EINVAL;
+//	}
+//	if (!json_object_object_get_ex(j, "result", &jv)) {
+//		response->status = PSSCLI_RESPONSE_STATUS_INVALID;
+//		return PSSCLI_EINVAL;
+//	}
+//	strcpy(response->content, json_object_get_string(jv));
+//	response->length = strlen(response->content);
 
 	json_tokener_free(jt);
 	return PSSCLI_EOK;
 }
 
 // create json rpc string from cmd 
-int json_cmd_write(char *json_string, int json_string_len, psscli_cmd *cmd) {
+int json_write(char *json_string, int json_string_len, psscli_cmd *cmd) {
 	json_object *j;
 	json_object *jp;
 	json_object *jv;

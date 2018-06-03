@@ -8,28 +8,28 @@
 // state
 static char started;
 
-// outgoing messages queues for websocket
-queue_t cmd_queue;
-queue_t response_queue;
+// message queues for the system
+// 0 = outgoing from socket
+// 1 = in websocket transfer
+// 2 = incoming to socket (both sync replies and subscriptions)
+queue_t q[3];
 
 // incremented on each queued message
 static int seq;
 
-int psscli_queue_start(short cmdsize, short responsesize) {
-	minq_init(&cmd_queue, cmdsize);
-	minq_init(&response_queue, responsesize);
-	psscli_cmd_current.status = PSSCLI_CMD_STATUS_NONE;
-	psscli_cmd_current.valuecount = 0;
-	psscli_response_current.status = PSSCLI_RESPONSE_STATUS_NONE;
-	psscli_response_current.length = 0;
+int psscli_queue_start(short size) {
+	minq_init(&q[PSSCLI_QUEUE_OUT], size);
+	minq_init(&q[PSSCLI_QUEUE_X], size);
+	minq_init(&q[PSSCLI_QUEUE_IN], size);
 	started = 1;
 	seq = 0;
 	return PSSCLI_EOK;
 }
 
 void psscli_queue_stop() {
-	minq_free(&cmd_queue);	
-	minq_free(&response_queue);
+	minq_free(&q[PSSCLI_QUEUE_OUT]);	
+	minq_free(&q[PSSCLI_QUEUE_X]);
+	minq_free(&q[PSSCLI_QUEUE_IN]);
 }
 
 psscli_cmd* psscli_cmd_alloc(psscli_cmd *cmd, int valuecount) {
@@ -87,19 +87,19 @@ int psscli_cmd_copy(psscli_cmd *to, psscli_cmd *from) {
 	return PSSCLI_EOK;
 }
 
-int psscli_cmd_queue_add(psscli_cmd *cmd) {
-	if (minq_add(&cmd_queue, (void*)cmd) == -1) {
+int psscli_cmd_queue_add(char qid, psscli_cmd *cmd) {
+	if (minq_add(&q[qid], (void*)cmd) == -1) {
 		return -1;
 	}
 	cmd->id = seq++;
 	return 0;
 }
 
-psscli_cmd *psscli_cmd_queue_peek() {
+psscli_cmd *psscli_cmd_queue_peek(char qid) {
 	void *entry;
 	psscli_cmd *cmd;
 
-	if (minq_peek(&cmd_queue, &entry)) {
+	if (minq_peek(&q[qid], &entry)) {
 		return NULL;
 	}
 	cmd = (psscli_cmd*)entry;
@@ -109,11 +109,11 @@ psscli_cmd *psscli_cmd_queue_peek() {
 	return cmd;
 }
 
-psscli_cmd *psscli_cmd_queue_next() {
+psscli_cmd *psscli_cmd_queue_next(char qid) {
 	void *entry;
 	psscli_cmd *cmd;
 
-	if (minq_next(&cmd_queue, &entry)) {
+	if (minq_next(&q[qid], &entry)) {
 		return NULL;
 	}
 	cmd = (psscli_cmd*)entry;
@@ -123,29 +123,29 @@ psscli_cmd *psscli_cmd_queue_next() {
 	return cmd;
 }
 
-int psscli_response_queue_add(psscli_response *response) {
-	if (minq_add(&response_queue, (void*)response) == -1) {
-		return -1;
-	}
-	return 0;
-}
-
-psscli_response *psscli_response_queue_peek() {
-	void *entry;
-	psscli_response *response;
-
-	if (minq_peek(&response_queue, &entry)) {
-		return NULL;
-	}
-	return (psscli_response*)entry;
-}
-
-psscli_response *psscli_response_queue_next() {
-	void *entry;
-	psscli_response *response;
-
-	if (minq_next(&response_queue, &entry)) {
-		return NULL;
-	}
-	return (psscli_response*)entry;
-}
+//int psscli_response_queue_add(psscli_response *response) {
+//	if (minq_add(&response_queue, (void*)response) == -1) {
+//		return -1;
+//	}
+//	return 0;
+//}
+//
+//psscli_response *psscli_response_queue_peek() {
+//	void *entry;
+//	psscli_response *response;
+//
+//	if (minq_peek(&response_queue, &entry)) {
+//		return NULL;
+//	}
+//	return (psscli_response*)entry;
+//}
+//
+//psscli_response *psscli_response_queue_next() {
+//	void *entry;
+//	psscli_response *response;
+//
+//	if (minq_next(&response_queue, &entry)) {
+//		return NULL;
+//	}
+//	return (psscli_response*)entry;
+//}
