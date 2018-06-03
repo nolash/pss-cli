@@ -148,12 +148,13 @@ static void *process_input(void *arg) {
 		}
 		fprintf(stderr, "\n");
 
-		psscli_cmd_alloc(&cmd, 1);
+		psscli_cmd_alloc(&cmd, 0);
 
 		// lock global vars for copy
 		pthread_mutex_lock(&pt_lock_state);
 		cmd->id = cursor;
 		cmd->sdptr = (int*)arg;
+		cmd->status = PSSCLI_STATUS_LOCAL;
 		pthread_mutex_unlock(&pt_lock_state);
 
 		// 

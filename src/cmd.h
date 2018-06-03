@@ -33,9 +33,9 @@ typedef struct psscli_cmd_ {
 	char **values; // parsed command values
 	unsigned char valuecount; // number of command values
 	char src[4096]; // raw data
+	int srclength; // length of src
 } psscli_cmd;
 
-psscli_cmd psscli_cmd_current;
 //
 //typedef struct psscli_response_ {
 //	long int id;

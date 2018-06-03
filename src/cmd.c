@@ -39,7 +39,12 @@ psscli_cmd* psscli_cmd_alloc(psscli_cmd **cmd, int valuecount) {
 	p = malloc(sizeof(psscli_cmd));
 	p->status = 0;
 	p->valuecount = valuecount;
-	p->values = malloc(sizeof(char**)*valuecount);
+	i = valuecount;
+	if (valuecount) {
+		p->values = malloc(sizeof(char**)*i);
+	} else {
+		p->values = NULL;
+	}
 	if (p->values == NULL && valuecount > 0) {
 		p->valuecount = 0;
 		return NULL;
@@ -51,6 +56,7 @@ psscli_cmd* psscli_cmd_alloc(psscli_cmd **cmd, int valuecount) {
 	p->sd = -1;
 	p->sdptr = 0;
 	p->code = PSSCLI_CMD_NONE; 
+	p->srclength = 0;
 	memset(p->src, 0, sizeof(p->src));
 	*cmd = p;
 	return *cmd;

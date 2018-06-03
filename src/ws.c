@@ -62,7 +62,7 @@ int psscli_ws_init(psscli_ws_callback callback, const char *version) {
 	struct sigaction sa;
 
 	psscli_protocols_[0].callback = (void*)callback;
-	psscli_protocols_[0].user = (void*)&psscli_cmd_current;
+	//psscli_protocols_[0].user = (void*)&psscli_cmd_current;
 	memset(&(psscli_ws.wci), 0, sizeof(psscli_ws.wci));
 	psscli_ws.wci.uid = -1;
 	psscli_ws.wci.gid = -1;
@@ -123,7 +123,7 @@ void *parse_loop(void *arg) {
 		}
 		while(1) {
 			pthread_mutex_lock(&pt_lock_queue);
-			p = psscli_cmd_queue_peek(PSSCLI_QUEUE_X);
+			p = psscli_cmd_queue_peek(PSSCLI_QUEUE_IN);
 			if (p == NULL) {
 				pthread_mutex_unlock(&pt_lock_queue);
 				break;
@@ -144,6 +144,7 @@ void *parse_loop(void *arg) {
 	return NULL;
 }
 
+// \todo put json write in this loop
 void *write_loop(void *arg) {
 	int last;
 	int next;
@@ -161,7 +162,7 @@ void *write_loop(void *arg) {
 			break;
 		}
 		pthread_mutex_lock(&pt_lock_queue);
-		cmd = psscli_cmd_queue_next(PSSCLI_QUEUE_OUT);
+		cmd = psscli_cmd_queue_peek(PSSCLI_QUEUE_OUT);
 		if (cmd == NULL) {
 			pthread_mutex_unlock(&pt_lock_queue);
 			continue;
@@ -175,11 +176,8 @@ void *write_loop(void *arg) {
 			fprintf(stderr, "next is noop");
 			continue;
 		}
-		if (psscli_cmd_copy(&psscli_cmd_current, cmd)) {
-			pthread_mutex_unlock(&pt_lock_queue);
-			fprintf(stderr, "cmd copy fail in write thread\n");
-			continue;
-		}
+		// \todo this should be set only after json formatting is completed
+		cmd->status |= PSSCLI_STATUS_VALID; 
 		pthread_mutex_unlock(&pt_lock_queue);
 
 		// if command is pending, then calling writable will try to dispatch it again
@@ -289,7 +287,7 @@ int json_parse(psscli_cmd *cmd) {
 	}
 
 	jt = json_tokener_new();
-	j = json_tokener_parse_ex(jt, cmd->src, strlen(cmd->src));
+	j = json_tokener_parse_ex(jt, cmd->src, cmd->srclength);
 	if (j == NULL) {
 		return PSSCLI_EINVAL;
 	}
@@ -314,7 +312,11 @@ int json_parse(psscli_cmd *cmd) {
 		cmd->status &= (~PSSCLI_STATUS_VALID);
 		return PSSCLI_EINVAL;
 	}
-	free(*(cmd->values));
+	if (cmd->values != NULL) {
+		free(*(cmd->values));
+	} else {
+		cmd->values = malloc(sizeof(char**));
+	}
 	p = json_object_get_string(jv);
 	*(cmd->values) = malloc(sizeof(char)*strlen(p));
 	strcpy(*(cmd->values), p);
