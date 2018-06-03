@@ -16,7 +16,6 @@
 #define PSSCLI_STATUS_TX 8 // if message has been transmitted
 #define PSSCLI_STATUS_DONE 128 // if message can be garbage collected
 
-
 enum psscli_cmd_code {
 	PSSCLI_CMD_NONE,
 	PSSCLI_CMD_MSG, // incoming message

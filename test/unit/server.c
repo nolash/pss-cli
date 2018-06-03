@@ -19,7 +19,171 @@ void *server(void *arg) {
 	return NULL;
 }
 
-void *process_reply(void *arg);
+
+// \todo segfaults on shutdown
+// \todo move write reply to separate thread triggered by pthread cond
+int test_sock() {
+	struct timespec ts;
+	struct sockaddr_un rs;
+	int sd;
+	int c;
+
+	int rsd;
+	int *rsdptr;
+
+	unsigned char b[1024];
+	psscli_cmd *cmd;
+	psscli_cmd *cmd_resp;
+
+	psscli_config_init();
+
+	psscli_start();
+	psscli_queue_start(2);
+
+	if (pthread_create(&pt_server, NULL, server, NULL) == -1) {
+		return 1;
+	}
+
+	// timeout for polling read/write ready
+	ts.tv_sec = 0;
+	ts.tv_nsec = 50000000;
+
+	// wait until websocket is connected
+	while (!psscli_server_status() == PSSCLI_SERVER_STATUS_RUNNING) {
+		nanosleep(&ts, NULL);
+	}
+
+	// send command on socket
+	if ((sd = socket(AF_UNIX, SOCK_STREAM, 0)) == -1) {
+		psscli_server_stop();
+		pthread_join(pt_server, NULL);
+		return 2;
+	}
+	rs.sun_family = AF_UNIX;
+	strcpy(rs.sun_path, conf.sock);
+	c = strlen(rs.sun_path) + sizeof(rs.sun_family);
+	
+	if (connect(sd, (struct sockaddr *)&rs, c) == -1) {
+		psscli_server_stop();
+		pthread_join(pt_server, NULL);
+		return 3;
+	}
+
+	// get the socket descriptor
+	// (requires TESTING macro defined)
+	if (recv(sd, b, sizeof(int*)+sizeof(int), 0) == -1) {
+		fprintf(stderr, "recv sd fail\n");
+		psscli_server_stop();
+		pthread_join(pt_server, NULL);
+		return 4;
+	}
+
+	// recover the pointers used
+	memcpy(&rsdptr, b, sizeof(int*));
+	memcpy(&rsd, b+sizeof(int*), sizeof(int));
+
+	b[0] = PSSCLI_CMD_BASEADDR;
+	strcpy(b+1, "foo");
+	if (send(sd, b, 4, 0) == -1) {
+		fprintf(stderr, "send 1 fail\n");
+		psscli_server_stop();
+		pthread_join(pt_server, NULL);
+		return 3;
+	}
+
+	while (psscli_cmd_queue_peek(PSSCLI_QUEUE_OUT) == NULL) {
+		nanosleep(&ts, NULL);
+	}
+
+	cmd = psscli_cmd_queue_next(PSSCLI_QUEUE_OUT);
+	if (cmd == NULL) {
+		fprintf(stderr, "can't get cmd\n");
+		psscli_server_stop();
+		pthread_join(pt_server, NULL);
+		return 4;
+	}
+
+	psscli_cmd_alloc(&cmd_resp, 1);
+	cmd_resp->id = cmd->id;
+	cmd_resp->status = PSSCLI_STATUS_VALID | PSSCLI_STATUS_COMPLETE;
+	cmd_resp->sd = rsd;
+	cmd_resp->sdptr = rsdptr;
+	*(cmd_resp->values) = malloc(sizeof(char)*4);
+	strcpy(*(cmd_resp->values), "bar");
+	if (psscli_cmd_queue_add(PSSCLI_QUEUE_IN, cmd_resp) == -1) {
+		fprintf(stderr, "can't add response\n");
+		psscli_server_stop();
+		pthread_join(pt_server, NULL);
+		return 5;
+	}
+
+	pthread_cond_signal(&pt_cond_reply);
+	if ((c = recv(sd, b, 1024, 0)) == -1) {
+		fprintf(stderr, "can't receive response\n");
+		psscli_server_stop();
+		pthread_join(pt_server, NULL);
+		return 6;
+	}
+
+	b[c] = 0;
+	fprintf(stderr, "recv 1: %s\n", b);
+	psscli_cmd_free(cmd);
+
+	b[0] = PSSCLI_CMD_BASEADDR;
+	strcpy(b+1, "baz");
+	if (send(sd, b, 4, 0) == -1) {
+		fprintf(stderr, "send 2 fail\n");
+		psscli_server_stop();
+		pthread_join(pt_server, NULL);
+		return 7;
+	}
+
+	while (psscli_cmd_queue_peek(PSSCLI_QUEUE_OUT) == NULL) {
+		nanosleep(&ts, NULL);
+	}
+
+	cmd = psscli_cmd_queue_next(PSSCLI_QUEUE_OUT);
+	if (cmd == NULL) {
+		fprintf(stderr, "can't get cmd\n");
+		psscli_server_stop();
+		pthread_join(pt_server, NULL);
+		return 8;
+	}
+
+	psscli_cmd_alloc(&cmd_resp, 1);
+	cmd_resp->id = cmd->id;
+	cmd_resp->status = PSSCLI_STATUS_VALID | PSSCLI_STATUS_COMPLETE;
+	cmd_resp->sd = rsd;
+	cmd_resp->sdptr = rsdptr;
+	*(cmd_resp->values) = malloc(sizeof(char)*6);
+	strcpy(*(cmd_resp->values), "xyzzy");
+	if (psscli_cmd_queue_add(PSSCLI_QUEUE_IN, cmd_resp) == -1) {
+		fprintf(stderr, "can't add response\n");
+		psscli_server_stop();
+		pthread_join(pt_server, NULL);
+		return 9;
+	}
+
+	pthread_cond_signal(&pt_cond_reply);
+	if ((c = recv(sd, b, 1024, 0)) == -1) {
+		fprintf(stderr, "can't receive response\n");
+		psscli_server_stop();
+		pthread_join(pt_server, NULL);
+		return 10;
+	}
+
+	b[c] = 0;
+	fprintf(stderr, "recv 2: %s\n", b);
+	psscli_cmd_free(cmd);
+
+	close(sd);
+	psscli_stop();
+	psscli_server_stop();
+	psscli_queue_stop();
+	pthread_join(pt_server, NULL);
+
+	return 0;
+}
 
 // \todo find a nicer way to sync test receive on socket with the parse reply loop
 int test_reply() {
@@ -37,11 +201,11 @@ int test_reply() {
 	int *rsdptr;
 	int fails;
 
-	psscli_response *response;
+	psscli_cmd *cmd;
 
 	psscli_config_init();
 	psscli_start();
-	psscli_queue_start(100, 100);
+	psscli_queue_start(100);
 	if ((pthread_create(&pt_server, NULL, server, NULL)) == -1) {
 		return 1;
 	}
@@ -87,15 +251,15 @@ int test_reply() {
 
 	// send messages
 	for (i = 0; i < 100; i++) {
-		response = malloc(sizeof(psscli_response));
-		response->id = i;
-		response->status = PSSCLI_RESPONSE_STATUS_PARSED;
-		response->length = 3;
-		response->sd = rsd;
-		response->sdptr = rsdptr;
-		strcpy(response->content, "foo");
+		psscli_cmd_alloc(&cmd, 1);
+		cmd->id = i;
+		cmd->status = PSSCLI_STATUS_VALID | PSSCLI_STATUS_COMPLETE;
+		cmd->sd = rsd;
+		cmd->sdptr = rsdptr;
+		*(cmd->values) = malloc(sizeof(char)*1024);
+		strcpy(*(cmd->values), "foo");
 
-		if (psscli_response_queue_add(response) == -1) {
+		if (psscli_cmd_queue_add(PSSCLI_QUEUE_IN, cmd) == -1) {
 			psscli_server_stop();	
 			pthread_join(pt_server, NULL);
 			return 4;
@@ -128,177 +292,11 @@ int test_reply() {
 	return 0;
 }
 
-// \todo segfaults on shutdown
-// \todo move write reply to separate thread triggered by pthread cond
-int test_sock() {
-	struct timespec ts;
-	struct sockaddr_un rs;
-	int sd;
-	int c;
-
-	int rsd;
-	int *rsdptr;
-
-	unsigned char b[1024];
-	psscli_cmd *cmd;
-	psscli_response *response;
-
-	psscli_config_init();
-
-	psscli_start();
-	psscli_queue_start(2, 2);
-
-	if (pthread_create(&pt_server, NULL, server, NULL) == -1) {
-		return 1;
-	}
-
-	// timeout for polling read/write ready
-	ts.tv_sec = 0;
-	ts.tv_nsec = 50000000;
-
-	// wait until websocket is connected
-	while (!psscli_server_status() == PSSCLI_SERVER_STATUS_RUNNING) {
-		nanosleep(&ts, NULL);
-	}
-
-	// send command on socket
-	if ((sd = socket(AF_UNIX, SOCK_STREAM, 0)) == -1) {
-		psscli_server_stop();
-		pthread_join(pt_server, NULL);
-		return 2;
-	}
-	rs.sun_family = AF_UNIX;
-	strcpy(rs.sun_path, conf.sock);
-	c = strlen(rs.sun_path) + sizeof(rs.sun_family);
-	
-
-	if (connect(sd, (struct sockaddr *)&rs, c) == -1) {
-		psscli_server_stop();
-		pthread_join(pt_server, NULL);
-		return 3;
-	}
-
-	// get the socket descriptor
-	// (requires TESTING macro defined)
-	if (recv(sd, b, sizeof(int*)+sizeof(int), 0) == -1) {
-		fprintf(stderr, "recv sd fail\n");
-		psscli_server_stop();
-		pthread_join(pt_server, NULL);
-		return 4;
-	}
-
-	// recover the pointers used
-	memcpy(&rsdptr, b, sizeof(int*));
-	memcpy(&rsd, b+sizeof(int*), sizeof(int));
-
-	b[0] = PSSCLI_CMD_BASEADDR;
-	strcpy(b+1, "foo");
-	if (send(sd, b, 4, 0) == -1) {
-		fprintf(stderr, "send 1 fail\n");
-		psscli_server_stop();
-		pthread_join(pt_server, NULL);
-		return 3;
-	}
-
-	while (psscli_cmd_queue_peek() == NULL) {
-		nanosleep(&ts, NULL);
-	}
-
-	cmd = psscli_cmd_queue_next();
-	if (cmd == NULL) {
-		fprintf(stderr, "can't get cmd\n");
-		psscli_server_stop();
-		pthread_join(pt_server, NULL);
-		return 4;
-	}
-
-	response = malloc(sizeof(psscli_response));
-	response->id = cmd->id;
-	response->status = PSSCLI_RESPONSE_STATUS_PARSED;
-	response->sd = rsd;
-	response->sdptr = rsdptr;
-	strcpy(response->content, "baz");
-	response->length = 3;
-	if (psscli_response_queue_add(response) == -1) {
-		fprintf(stderr, "can't add response\n");
-		psscli_server_stop();
-		pthread_join(pt_server, NULL);
-		return 5;
-	}
-
-	pthread_cond_signal(&pt_cond_reply);
-	if ((c = recv(sd, b, 1024, 0)) == -1) {
-		fprintf(stderr, "can't receive response\n");
-		psscli_server_stop();
-		pthread_join(pt_server, NULL);
-		return 6;
-	}
-
-	b[c] = 0;
-	fprintf(stderr, "recv 1: %s\n", b);
-	psscli_cmd_free(cmd);
-
-	b[0] = PSSCLI_CMD_BASEADDR;
-	strcpy(b+1, "bar");
-	if (send(sd, b, 4, 0) == -1) {
-		fprintf(stderr, "send 2 fail\n");
-		psscli_server_stop();
-		pthread_join(pt_server, NULL);
-		return 7;
-	}
-
-	while (psscli_cmd_queue_peek() == NULL) {
-		nanosleep(&ts, NULL);
-	}
-
-	cmd = psscli_cmd_queue_next();
-	if (cmd == NULL) {
-		fprintf(stderr, "can't get cmd\n");
-		psscli_server_stop();
-		pthread_join(pt_server, NULL);
-		return 8;
-	}
-
-	response = malloc(sizeof(psscli_response));
-	response->id = cmd->id;
-	response->status = PSSCLI_RESPONSE_STATUS_PARSED;
-	response->sd = rsd;
-	response->sdptr = rsdptr;
-	strcpy(response->content, "xyzzy");
-	response->length = 5;
-	if (psscli_response_queue_add(response) == -1) {
-		fprintf(stderr, "can't add response\n");
-		psscli_server_stop();
-		pthread_join(pt_server, NULL);
-		return 9;
-	}
-
-	pthread_cond_signal(&pt_cond_reply);
-	if ((c = recv(sd, b, 1024, 0)) == -1) {
-		fprintf(stderr, "can't receive response\n");
-		psscli_server_stop();
-		pthread_join(pt_server, NULL);
-		return 10;
-	}
-
-	b[c] = 0;
-	fprintf(stderr, "recv 2: %s\n", b);
-	psscli_cmd_free(cmd);
-
-	close(sd);
-	psscli_stop();
-	psscli_server_stop();
-	pthread_join(pt_server, NULL);
-	psscli_queue_stop();
-
-	return 0;
-}
-
 int main() {
+//	if (test_sock()) {
+//		return 1;
+//	}
 	if (test_reply()) {
-		return 1;
-	}
-	if (test_sock()) {
 		return 2;
 	}
 	return 0;

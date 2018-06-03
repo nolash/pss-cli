@@ -33,15 +33,25 @@ void psscli_queue_stop() {
 }
 
 psscli_cmd* psscli_cmd_alloc(psscli_cmd **cmd, int valuecount) {
+	int i;
 	psscli_cmd *p;
 
 	p = malloc(sizeof(psscli_cmd));
+	p->status = 0;
 	p->valuecount = valuecount;
 	p->values = malloc(sizeof(char**)*valuecount);
 	if (p->values == NULL && valuecount > 0) {
 		p->valuecount = 0;
 		return NULL;
 	}
+	for (i = 0; i < valuecount; i++) {
+		*(p->values) = NULL;
+	}
+	p->id = -1;
+	p->sd = -1;
+	p->sdptr = 0;
+	p->code = PSSCLI_CMD_NONE; 
+	memset(p->src, 0, sizeof(p->src));
 	*cmd = p;
 	return *cmd;
 }
@@ -66,7 +76,9 @@ int psscli_cmd_copy(psscli_cmd *to, psscli_cmd *from) {
 	int i, j;
 
 	for (i = 0; i < to->valuecount; i++) {
-		free(*(to->values+i));
+		if (*(to->values+1) != NULL) {
+			free(*(to->values+i));
+		}
 	}
 	free(to->values);
 	to->values = malloc(sizeof(char**)*from->valuecount);
@@ -88,6 +100,9 @@ int psscli_cmd_copy(psscli_cmd *to, psscli_cmd *from) {
 	to->id = from->id;
 	to->code = from->code;
 	to->status = from->status;
+	to->sd = from->sd;
+	to->sdptr = from->sdptr;
+	memcpy(to->src, from->src, sizeof(from->src));
 	return PSSCLI_EOK;
 }
 
@@ -107,9 +122,6 @@ psscli_cmd *psscli_cmd_queue_peek(char qid) {
 		return NULL;
 	}
 	cmd = (psscli_cmd*)entry;
-	if (cmd->code == PSSCLI_CMD_NONE) {
-		return NULL;
-	}
 	return cmd;
 }
 
@@ -120,11 +132,7 @@ psscli_cmd *psscli_cmd_queue_next(char qid) {
 	if (minq_next(&q[qid], &entry)) {
 		return NULL;
 	}
-	cmd = (psscli_cmd*)entry;
-	if (cmd->code == PSSCLI_CMD_NONE) {
-		return NULL;
-	}
-	return cmd;
+	return (psscli_cmd*)entry;
 }
 
 //int psscli_response_queue_add(psscli_response *response) {

@@ -47,11 +47,9 @@ psscli_cmd *parse_raw(psscli_cmd *cmd) {
 
 	switch (cmd->code) {
 		case PSSCLI_CMD_BASEADDR:
-			free(*(cmd->values));
 			return cmd;
 			break;
 		case PSSCLI_CMD_GETPUBLICKEY:
-			free(*(cmd->values));
 			return cmd;
 			break;
 //		case PSSCLI_CMD_SETPEERPUBLICKEY:
@@ -132,8 +130,10 @@ static void *process_input(void *arg) {
 	char b[PSSCLI_SERVER_SOCK_BUFFERSIZE];
 	psscli_cmd *cmd;
 
+	pthread_rwlock_wrlock(&pt_rw);
 	lsd = *((int*)arg);
-
+	pthread_rwlock_unlock(&pt_rw);
+	
 	while (running()) {
 		if ((c = recv(lsd, &b, PSSCLI_SERVER_SOCK_BUFFERSIZE, 0)) <= 0) {
 			fprintf(stderr, "input error on %d (%d)\n", lsd, errno);
@@ -148,17 +148,18 @@ static void *process_input(void *arg) {
 		}
 		fprintf(stderr, "\n");
 
-		cmd = malloc(sizeof(psscli_cmd));
-		psscli_cmd_alloc(cmd, 1);
-		*(cmd->values) = malloc(sizeof(unsigned char)*(c-1)); // parse raw will deallocate this
+		psscli_cmd_alloc(&cmd, 1);
 
+		// lock global vars for copy
 		pthread_mutex_lock(&pt_lock_state);
 		cmd->id = cursor;
+		cmd->sdptr = (int*)arg;
 		pthread_mutex_unlock(&pt_lock_state);
+
+		// 
 		cmd->code = (unsigned char)*b;
 		cmd->sd = lsd;
-		cmd->sdptr = (int*)arg;
-		memcpy(*(cmd->values), b+1, c-1);
+		memcpy(cmd->src, b+1, c-1);
 	
 		cmd = parse_raw(cmd);
 		if (cmd == NULL) {
@@ -170,7 +171,7 @@ static void *process_input(void *arg) {
 		}
 
 		pthread_mutex_lock(&pt_lock_queue);
-		if (psscli_cmd_queue_add(cmd) == -1) {
+		if (psscli_cmd_queue_add(PSSCLI_QUEUE_OUT, cmd) == -1) {
 			pthread_mutex_unlock(&pt_lock_queue);
 			fprintf(stderr, "cmd queue add fail, id %d\n", cmd->id);
 			psscli_cmd_free(cmd);
@@ -185,7 +186,6 @@ static void *process_input(void *arg) {
 	pthread_rwlock_wrlock(&pt_rw);
 	sdlist[lsd] = NULL;
 	pthread_rwlock_unlock(&pt_rw);
-	free(arg);
 	fprintf(stderr, "exit input process on %d\n", lsd);
 	pthread_exit(NULL);
 	return NULL;
@@ -196,8 +196,8 @@ PRIVATE void *process_reply(void *arg) {
 	int r;
 	int c;
 	int lsd;
-	psscli_response response;
-	psscli_response *p;
+	psscli_cmd *cmd;
+	psscli_cmd *p;
 
 	//pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
 
@@ -211,29 +211,31 @@ PRIVATE void *process_reply(void *arg) {
 			fprintf(stderr, "reply process thread exiting\n");
 			break;
 		}
-		p = psscli_response_queue_next();
+		p = psscli_cmd_queue_next(PSSCLI_QUEUE_IN);
 		if (p == NULL) {
 			pthread_mutex_unlock(&pt_lock_queue);
 			continue;
 		}
-		memcpy(&response, p, sizeof(psscli_response));
-		free(p);
+		psscli_cmd_alloc(&cmd, 1);
+		psscli_cmd_copy(cmd, p);
+		psscli_cmd_free(p); // this frees the command copy in the in queue
 		pthread_mutex_unlock(&pt_lock_queue);
 
 		pthread_rwlock_rdlock(&pt_rw);
-		if (sdlist[response.sd] != response.sdptr) {
+		if (sdlist[cmd->sd] != cmd->sdptr) {
+			psscli_cmd_free(cmd);
 			pthread_rwlock_unlock(&pt_rw);
-			fprintf(stderr, "stale sd %d (%p) in reply id %d\n", response.sd, response.sdptr, response.id);
+			fprintf(stderr, "stale sd %d (%p) in reply id %d\n", cmd->sd, cmd->sdptr, cmd->id);
 			break;
 		}
 		pthread_rwlock_unlock(&pt_rw);
 
-		fprintf(stderr, "got response id %d: %s\n", response.id, response.content);
+		fprintf(stderr, "got response id %d: %s\n", cmd->id, *(cmd->values));
 
-		if ((c = send(response.sd, response.content, response.length, 0)) <= 0) {
-			fprintf(stderr, "failed reply socket send on %d (%d)\n", response.sd, errno);
-			continue;
+		if ((c = send(cmd->sd, *(cmd->values), sizeof(*(cmd->values)), 0)) <= 0) {
+			fprintf(stderr, "failed reply socket send on %d (%d)\n", cmd->sd, errno);
 		}
+		psscli_cmd_free(cmd); // this frees the local copy of the cmd
 	}
 
 	pthread_exit(NULL);
@@ -274,7 +276,6 @@ int psscli_server_start() {
 	l = sizeof(struct sockaddr_un);
 	while (sd2 = accept(sd, (struct sockaddr*)&sr, &l)) {
 		int r;
-		int *idx;
 
 		if (!psscli_running()) {
 			break;
@@ -284,17 +285,15 @@ int psscli_server_start() {
 		}
 
 		// copy the socket reference for reply
-		idx = malloc(sizeof(int*));
-		idx = &sd2;
 		pthread_rwlock_wrlock(&pt_rw);
-		sdlist[sd2] = idx;
+		sdlist[sd2] = &sd2;
 		pthread_rwlock_unlock(&pt_rw);
 
 		fprintf(stderr, "sock connect %d\n", sd2);
 
 #ifdef TESTING
 		int p;
-		if (send(sd2, &idx, sizeof(int*), 0) == -1) {
+		if (send(sd2, &sdlist[sd2], sizeof(int*), 0) == -1) {
 			r = PSSCLI_ESYNC;
 			sprintf(psscli_error_string, "failed to send sd ptr in test mode");
 		}
@@ -304,10 +303,9 @@ int psscli_server_start() {
 		}
 #endif
 
-		if (pthread_create(&pt_cmd[r], NULL, process_input, (void*)idx)) { 
-			free(idx);
+		if (pthread_create(&pt_cmd[r], NULL, process_input, (void*)sdlist[sd2])) { 
 			r = PSSCLI_ESYNC;
-			sprintf(psscli_error_string, "failed to start input processing thread (%d)\n", errno);
+			fprintf(stderr, "failed to start input processing thread (%d)\n", errno);
 			if (send(sd2, (unsigned char*)&r, 1, 0) == -1) {
 				sprintf(psscli_error_string, "socket write fail (input processing) on %d (%d)\n", sd2, errno);
 			}
@@ -317,12 +315,11 @@ int psscli_server_start() {
 		pthread_mutex_unlock(&pt_lock_state);
 	}
 
-	fprintf(stderr, "socket closed\n");
+	fprintf(stderr, "server shutting down\n");
 	pthread_cond_signal(&pt_cond_reply);
 
 	pthread_join(pt_reply, NULL);
 
-	close(sd);
 	return PSSCLI_EOK;
 }
 
