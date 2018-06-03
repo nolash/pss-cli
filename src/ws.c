@@ -32,6 +32,8 @@ extern pthread_cond_t pt_cond_parse;
 extern pthread_cond_t pt_cond_write;
 extern pthread_mutex_t pt_lock_state;
 extern pthread_mutex_t pt_lock_queue;
+static pthread_mutex_t pt_lock_parse;
+static pthread_mutex_t pt_lock_write;
 extern pthread_cond_t pt_cond_reply;
 
 // queues
@@ -39,6 +41,7 @@ extern psscli_cmd psscli_cmd_current;
 
 // internal functions
 static int psscli_ws_write_(struct lws *ws, char *buf, int buflen, enum lws_write_protocol wp);
+static int running();
 PRIVATE int json_cmd_write(char *json_string, int json_string_len, psscli_cmd *cmd);
 PRIVATE int json_response_parse(psscli_response *response);
 json_object *j_version;
@@ -82,12 +85,6 @@ int psscli_ws_init(psscli_ws_callback callback, const char *version) {
 	psscli_ws.wi.pwsi = &(psscli_ws.w);
 	psscli_ws.wi.ietf_version_or_minus_one = -1;
 
-	// we use pipe to insert into the send queue between command unix socket and websocket
-	if (pipe(psscli_ws.notify) < 0) {
-		return 1;
-	}
-	fcntl(psscli_ws.notify[0], F_SETFL, O_NONBLOCK);
-
 	psscli_ws.pid = getpid();
 
 	j_version = json_object_new_string(version);
@@ -107,19 +104,21 @@ static int parse(psscli_response *r) {
 	return 0;
 }
 
-static void *parse_loop() {
+void *parse_loop(void *arg) {
 	int c;
 	int last;
 	psscli_response *p;
 	psscli_response response;
 
-	pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
+	//pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
 	fprintf(stderr, "entering parseloop\n");
-	while (psscli_running()) {
-		pthread_cond_wait(&pt_cond_parse, &pt_lock_state);
-		if (!psscli_running()) {
+	while (running()) {
+		pthread_mutex_lock(&pt_lock_parse);
+		pthread_cond_wait(&pt_cond_parse, &pt_lock_parse);
+		fprintf(stderr, "parseloop wakeup\n");
+		pthread_mutex_unlock(&pt_lock_parse);
+		if (!running()) {
 			fprintf(stderr, "parseloop exit\n");
-			pthread_exit(&pt_parse);
 			break;
 		}
 		while(1) {
@@ -129,34 +128,36 @@ static void *parse_loop() {
 				pthread_mutex_unlock(&pt_lock_queue);
 				break;
 			}
-			memcpy(&response, p, sizeof(response));
+			memcpy(&response, p, sizeof(psscli_response));
 			pthread_mutex_unlock(&pt_lock_queue);
 			if (parse(&response)) {
 				break;
 			}
 			pthread_mutex_lock(&pt_lock_queue);
-			memcpy(p, &response, sizeof(response));
+			memcpy(p, &response, sizeof(psscli_response));
 			pthread_mutex_unlock(&pt_lock_queue);
 			pthread_cond_signal(&pt_cond_reply);
 		}
 	}
 
+	pthread_exit(NULL);
 	return NULL;
 }
 
-static void *write_loop() {
+void *write_loop(void *arg) {
 	int last;
 	int next;
 	psscli_cmd *cmd;
 
-	pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
+	//pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
 	fprintf(stderr, "entering writeloop\n");
-	while (psscli_running()) {
-		pthread_cond_wait(&pt_cond_write, &pt_lock_state);
+	while (running()) {
+		pthread_mutex_lock(&pt_lock_write);
+		pthread_cond_wait(&pt_cond_write, &pt_lock_write);
 		fprintf(stderr, "writeloop wakeup\n");
-		if (!psscli_running()) {
+		pthread_mutex_unlock(&pt_lock_write);
+		if (!running()) {
 			fprintf(stderr, "writeloop exit\n");
-			pthread_exit(&pt_write);
 			break;
 		}
 		pthread_mutex_lock(&pt_lock_queue);
@@ -170,10 +171,12 @@ static void *write_loop() {
 		// * we don't have a current command, OR
 		// * the current command is still pending
 		if (cmd->code == PSSCLI_CMD_NONE) {
+			pthread_mutex_unlock(&pt_lock_queue);
 			fprintf(stderr, "next is noop");
 			continue;
 		}
 		if (psscli_cmd_copy(&psscli_cmd_current, cmd)) {
+			pthread_mutex_unlock(&pt_lock_queue);
 			fprintf(stderr, "cmd copy fail in write thread\n");
 			continue;
 		}
@@ -183,6 +186,7 @@ static void *write_loop() {
 		lws_callback_on_writable(psscli_ws.w);
 	}
 
+	pthread_exit(NULL);
 	return NULL;
 }
 
@@ -201,30 +205,37 @@ int psscli_ws_start() {
 		fprintf(stderr, "write thread create fail\n");
 		return PSSCLI_EINIT;
 	}
-	while (psscli_running()) {
+	while (running()) {
 		fprintf(stderr, "poll ws\n");
 		lws_service(psscli_ws.ctx, PSSCLI_WS_LOOP_TIMEOUT);
 	}
-	pthread_mutex_lock(&pt_lock_state);
-	psscli_ws.connected = 0;	
-	pthread_mutex_unlock(&pt_lock_state);
+	pthread_cond_broadcast(&pt_cond_write);
+	pthread_cond_broadcast(&pt_cond_parse);
+	pthread_join(pt_write, NULL);
+	pthread_join(pt_parse, NULL);
 	fprintf(stderr, "connect loop exiting\n");
 	return PSSCLI_EOK;
 }
 
+static int running() {
+	int r;
+
+	pthread_mutex_lock(&pt_lock_state);
+	r = psscli_ws.pid;
+	pthread_mutex_unlock(&pt_lock_state);
+
+	return r;
+}
+
 // \todo orderly catch both threads
 void psscli_ws_stop() {
-	pthread_cancel(pt_write);
-	pthread_cancel(pt_parse);
-	pthread_cond_signal(&pt_cond_write);
-	pthread_cond_signal(&pt_cond_parse);
-	pthread_join(pt_write, NULL);
-	pthread_join(pt_parse, NULL);
-	psscli_ws.pid = 0;
-	psscli_ws.connected = 0;
 	if (psscli_ws.ctx != NULL) {
 		lws_context_destroy(psscli_ws.ctx);
 	}
+	pthread_mutex_lock(&pt_lock_state);
+	psscli_ws.pid = 0;
+	psscli_ws.connected = 0;	
+	pthread_mutex_unlock(&pt_lock_state);
 }
 
 int psscli_ws_send(psscli_cmd *cmd) {

@@ -15,11 +15,6 @@
 struct psscli_ws_ {
 	pid_t pid; // maintain event loop while this is >0
 	int connected; // set when websocket is connected
-	int notify[2]; // socket fds for triggering command sends
-	const char* host; // websocket host to connect to
-	const char* origin; // websocket CORS origin string
-	int port; // websocket port to connect to
-	int ssl; // websocket ssl yes/no (not implemented)
 	char buf[PSSCLI_WS_RX_BUFFER + LWS_PRE]; // websocket receive buffer
 	int id; // websocket RPC sequence id (increments for every successful RPC call in same session)
 

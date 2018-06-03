@@ -19,6 +19,7 @@ void *server(void *arg) {
 }
 
 // \todo segfaults on shutdown
+// \todo move write reply to separate thread triggered by pthread cond
 int test_sock() {
 	struct timespec ts;
 	struct sockaddr_un rs;
@@ -26,7 +27,7 @@ int test_sock() {
 	int c;
 	unsigned char b[1024];
 	psscli_cmd *cmd;
-	psscli_response response;
+	psscli_response *response;
 
 	psscli_config_init();
 
@@ -82,11 +83,12 @@ int test_sock() {
 		return 4;
 	}
 
-	response.id = cmd->id;
-	response.status = PSSCLI_RESPONSE_STATUS_PARSED;
-	strcpy(response.content, "baz");
-	response.length = 3;
-	if (psscli_response_queue_add(&response) == -1) {
+	response = malloc(sizeof(psscli_response));
+	response->id = cmd->id;
+	response->status = PSSCLI_RESPONSE_STATUS_PARSED;
+	strcpy(response->content, "baz");
+	response->length = 3;
+	if (psscli_response_queue_add(response) == -1) {
 		fprintf(stderr, "can't add response\n");
 		psscli_server_stop();
 		pthread_join(pt_server, NULL);
@@ -126,11 +128,12 @@ int test_sock() {
 		return 8;
 	}
 
-	response.id = cmd->id;
-	response.status = PSSCLI_RESPONSE_STATUS_PARSED;
-	strcpy(response.content, "xyzzy");
-	response.length = 5;
-	if (psscli_response_queue_add(&response) == -1) {
+	response = malloc(sizeof(psscli_response));
+	response->id = cmd->id;
+	response->status = PSSCLI_RESPONSE_STATUS_PARSED;
+	strcpy(response->content, "xyzzy");
+	response->length = 5;
+	if (psscli_response_queue_add(response) == -1) {
 		fprintf(stderr, "can't add response\n");
 		psscli_server_stop();
 		pthread_join(pt_server, NULL);
