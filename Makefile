@@ -11,7 +11,7 @@ obj:
 	gcc -g3 ${INCLUDE} -c ${SRCDIR}/config.c -o ${BUILDDIR}/config.o 
 	gcc -g3 ${INCLUDE} -c ${SRCDIR}/util.c -o ${BUILDDIR}/util.o 
 	gcc ${CFLAGS} -g3 ${INCLUDE} -c ${SRCDIR}/ws.c -o ${BUILDDIR}/ws.o
-	gcc -g3 ${INCLUDE} -c ${SRCDIR}/server.c -o ${BUILDDIR}/server.o
+	gcc ${CFLAGS} -g3 ${INCLUDE} -c ${SRCDIR}/server.c -o ${BUILDDIR}/server.o
 	gcc -g3 ${INCLUDE} -c ${SRCDIR}/cmd.c -o ${BUILDDIR}/cmd.o
 	gcc -g3 ${INCLUDE} -c ${SRCDIR}/error.c -o ${BUILDDIR}/error.o
 	gcc -g3 ${INCLUDE} -c ${SRCDIR}/callback.c -o ${BUILDDIR}/callback.o

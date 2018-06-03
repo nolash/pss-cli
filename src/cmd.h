@@ -26,6 +26,8 @@ enum psscli_cmd_code {
 
 typedef struct psscli_cmd_ {
 	long int id;
+	int sd;
+	int *sdptr;
 	char status;
 	enum psscli_cmd_code code;
 	char **values;
@@ -36,6 +38,8 @@ psscli_cmd psscli_cmd_current;
 
 typedef struct psscli_response_ {
 	long int id;
+	int sd;
+	int *sdptr;
 	char status;
 	char content[PSSCLI_CMD_RESPONSE_MAX]; 
 	int length;
