@@ -42,8 +42,8 @@ test-unit: obj
 	gcc -g3 ${INCLUDE} -o ${BUILDDIR}/test_minq ${BUILDDIR}/test_minq.o ${BUILDDIR}/minq.o
 	gcc -g3 ${INCLUDE} -o ${BUILDDIR}/test_cmd.o -c ${TESTDIR}/unit/cmd.c
 	gcc -g3 ${INCLUDE} -o ${BUILDDIR}/test_cmd ${BUILDDIR}/test_cmd.o ${BUILDDIR}/cmd.o ${BUILDDIR}/minq.o
-#	gcc -g3 ${INCLUDE} -o ${BUILDDIR}/test_ws.o -c ${TESTDIR}/unit/ws.c
-#	gcc -g3 ${INCLUDE} -o ${BUILDDIR}/test_ws ${BUILDDIR}/test_ws.o ${BUILDDIR}/cmd.o ${BUILDDIR}/minq.o ${BUILDDIR}/ws.o ${BUILDDIR}/sync.o -ljson-c -lwebsockets -lpthread
+	gcc -g3 ${INCLUDE} -o ${BUILDDIR}/test_ws.o -c ${TESTDIR}/unit/ws.c
+	gcc -g3 ${INCLUDE} -o ${BUILDDIR}/test_ws ${BUILDDIR}/test_ws.o ${BUILDDIR}/cmd.o ${BUILDDIR}/minq.o ${BUILDDIR}/ws.o ${BUILDDIR}/sync.o -ljson-c -lwebsockets -lpthread
 #	gcc -g3 ${INCLUDE} -o ${BUILDDIR}/test_server.o -c ${TESTDIR}/unit/server.c
 #	gcc -g3 ${INCLUDE} -o ${BUILDDIR}/test_server ${BUILDDIR}/test_server.o ${BUILDDIR}/cmd.o ${BUILDDIR}/minq.o ${BUILDDIR}/server.o ${BUILDDIR}/config.o ${BUILDDIR}/sync.o -lpthread
 #

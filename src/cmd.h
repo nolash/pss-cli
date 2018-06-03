@@ -11,8 +11,9 @@
 
 // bitwise
 #define PSSCLI_STATUS_LOCAL 1 // if message originated locally
-#define PSSCLI_STATUS_VALID 2 // if message has been parsed successfully
-#define PSSCLI_STATUS_TX 4 // if message has been transmitted
+#define PSSCLI_STATUS_COMPLETE 2 // if message has been received in full
+#define PSSCLI_STATUS_VALID 4 // if message has been parsed successfully
+#define PSSCLI_STATUS_TX 8 // if message has been transmitted
 #define PSSCLI_STATUS_DONE 128 // if message can be garbage collected
 
 
@@ -25,13 +26,14 @@ enum psscli_cmd_code {
 };
 
 typedef struct psscli_cmd_ {
-	long int id;
-	char status;
-	enum psscli_cmd_code code;
-	int sd;
-	int *sdptr;
-	char **values;
-	unsigned char valuecount;
+	long int id; // pss node request id
+	char status; // bitmask controlling command lifetime status
+	enum psscli_cmd_code code; // message type code
+	int sd; // file descriptor value of originating request
+	int *sdptr; // file descriptor pointer value of originating request
+	char **values; // parsed command values
+	unsigned char valuecount; // number of command values
+	char src[4096]; // raw data
 } psscli_cmd;
 
 psscli_cmd psscli_cmd_current;
@@ -72,7 +74,7 @@ void psscli_queue_stop();
  * \param valuecount number of string value fields to allocate.
  * \return pointer to allocated command object, or NULL if allocation failed.
  */
-psscli_cmd* psscli_cmd_alloc(psscli_cmd *cmd, int valuecount);
+psscli_cmd* psscli_cmd_alloc(psscli_cmd **cmd, int valuecount);
 
 /***
  * \brief release all resources held by command

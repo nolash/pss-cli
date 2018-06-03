@@ -32,14 +32,18 @@ void psscli_queue_stop() {
 	minq_free(&q[PSSCLI_QUEUE_IN]);
 }
 
-psscli_cmd* psscli_cmd_alloc(psscli_cmd *cmd, int valuecount) {
-	cmd->valuecount = valuecount;
-	cmd->values = malloc(sizeof(char*)*cmd->valuecount);
-	if (cmd->values == NULL) {
-		cmd->valuecount = 0;
+psscli_cmd* psscli_cmd_alloc(psscli_cmd **cmd, int valuecount) {
+	psscli_cmd *p;
+
+	p = malloc(sizeof(psscli_cmd));
+	p->valuecount = valuecount;
+	p->values = malloc(sizeof(char**)*valuecount);
+	if (p->values == NULL && valuecount > 0) {
+		p->valuecount = 0;
 		return NULL;
 	}
-	return cmd;
+	*cmd = p;
+	return *cmd;
 }
 
 void psscli_cmd_free(psscli_cmd *cmd) {
@@ -55,7 +59,7 @@ void psscli_cmd_free(psscli_cmd *cmd) {
 		}
 		free(cmd->values);
 	}
-	memset(cmd, 0, sizeof(psscli_cmd));
+	free(cmd);
 }
 
 int psscli_cmd_copy(psscli_cmd *to, psscli_cmd *from) {

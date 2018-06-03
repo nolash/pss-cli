@@ -282,41 +282,43 @@ int json_parse(psscli_cmd *cmd) {
 	json_tokener *jt;
 	json_object *j;
 	json_object *jv;
+	const char *p;
 
-//	if (response->status != PSSCLI_RESPONSE_STATUS_RECEIVED) {
-//		return PSSCLI_ENODATA;
-//	}
-//
-//	jt = json_tokener_new();
-//	j = json_tokener_parse_ex(jt, cmd->content, response->length);
-//	if (j == NULL) {
-//		return PSSCLI_EINVAL;
-//	}
-//	json_tokener_free(jt);
-//
-//	if (!json_object_object_get_ex(j, "jsonrpc", &jv)) {
-//		return PSSCLI_EINVAL;
-//	} else if (strcmp(json_object_get_string(jv), json_object_get_string(j_version))) {
-//		return PSSCLI_EINVAL;
-//	}
-//
-//	if(!json_object_object_get_ex(j, "id", &jv)) {
-//		response->status = PSSCLI_RESPONSE_STATUS_INVALID;
-//		return PSSCLI_EINVAL;
-//	}
-//	response->id = strtol(json_object_get_string(jv), NULL, 10);
-//	if (errno) {
-//		response->status = PSSCLI_RESPONSE_STATUS_INVALID;
-//		return PSSCLI_EINVAL;
-//	}
-//	if (!json_object_object_get_ex(j, "result", &jv)) {
-//		response->status = PSSCLI_RESPONSE_STATUS_INVALID;
-//		return PSSCLI_EINVAL;
-//	}
-//	strcpy(response->content, json_object_get_string(jv));
-//	response->length = strlen(response->content);
+	if (!(cmd->status & PSSCLI_STATUS_COMPLETE)) {
+		return PSSCLI_ENODATA;
+	}
 
+	jt = json_tokener_new();
+	j = json_tokener_parse_ex(jt, cmd->src, strlen(cmd->src));
+	if (j == NULL) {
+		return PSSCLI_EINVAL;
+	}
 	json_tokener_free(jt);
+
+	if (!json_object_object_get_ex(j, "jsonrpc", &jv)) {
+		return PSSCLI_EINVAL;
+	} else if (strcmp(json_object_get_string(jv), json_object_get_string(j_version))) {
+		return PSSCLI_EINVAL;
+	}
+
+	if(!json_object_object_get_ex(j, "id", &jv)) {
+		cmd->status &= (~PSSCLI_STATUS_VALID);
+		return PSSCLI_EINVAL;
+	}
+	cmd->id = strtol(json_object_get_string(jv), NULL, 10);
+	if (errno) {
+		cmd->status &= (~PSSCLI_STATUS_VALID);
+		return PSSCLI_EINVAL;
+	}
+	if (!json_object_object_get_ex(j, "result", &jv)) {
+		cmd->status &= (~PSSCLI_STATUS_VALID);
+		return PSSCLI_EINVAL;
+	}
+	free(*(cmd->values));
+	p = json_object_get_string(jv);
+	*(cmd->values) = malloc(sizeof(char)*strlen(p));
+	strcpy(*(cmd->values), p);
+
 	return PSSCLI_EOK;
 }
 
