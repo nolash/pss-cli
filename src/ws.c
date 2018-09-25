@@ -44,6 +44,7 @@ static int psscli_ws_write_(struct lws *ws, char *buf, int buflen, enum lws_writ
 static int running();
 PRIVATE int json_write(char *json_string, int json_string_len, psscli_cmd *cmd);
 PRIVATE int json_parse(psscli_cmd *cmd);
+
 json_object *j_version;
 void psscli_ws_connect_try_(int s);
 

@@ -68,7 +68,7 @@ int send_proto(struct lws *wsi, enum lws_callback_reasons reason, void *user, vo
 				pthread_mutex_unlock(&pt_lock_queue);
 				fprintf(stderr, "send problem: %d\n", r);
 			}
-			lcmd->status |= PSSCLI_STATUS_TX;
+			lcmd->status |= PSSCLI_STATUS_X;
 			lcmd->code = 0;
 			pthread_mutex_lock(&pt_lock_queue);
 			psscli_cmd_queue_add(PSSCLI_QUEUE_X, lcmd);
@@ -120,7 +120,7 @@ int recv_proto(struct lws *wsi, enum lws_callback_reasons reason, void *user, vo
 				pthread_mutex_unlock(&pt_lock_queue);
 				fprintf(stderr, "send problem: %d\n", r);
 			}
-			lcmd->status |= PSSCLI_STATUS_TX;
+			lcmd->status |= PSSCLI_STATUS_X;
 			lcmd->code = 0;
 			pthread_mutex_lock(&pt_lock_queue);
 			psscli_cmd_queue_add(PSSCLI_QUEUE_X, lcmd);

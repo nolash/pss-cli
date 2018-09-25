@@ -5,6 +5,7 @@ struct psscli_config {
 	char host[15];
 	unsigned short port;
 	char sock[512];
+	char *datadir;
 } conf;
 
 void psscli_config_init();

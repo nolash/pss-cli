@@ -9,12 +9,24 @@
 
 #define PSSCLI_QUEUE_MAX 64
 
-// bitwise
+// bitwise status flags
+//
+// a message with local origin (including the reply form the node) will have these states in its lifetime:
+// * received by socket server: 1
+// * parsed to json for sending: 1 | 2
+// * sent to node through websocket: 1 | 2 | 4
+// * fully received from websocket: 1 | 4 |  8
+// * parsed from json for passing to socket: 1 | 2 | 4 | 8
+//
+// a message with remote origin (subscribe) have these states:
+// * partially received from websocket: 4
+// * fully received from websocket: 4 | 8
+// * parsed from json for passing to socket: | 2 | 4 | 8
+//
 #define PSSCLI_STATUS_LOCAL 1 // if message originated locally
-#define PSSCLI_STATUS_COMPLETE 2 // if message has been received in full
-#define PSSCLI_STATUS_VALID 4 // if message has been parsed successfully
-#define PSSCLI_STATUS_TX 8 // if message has been transmitted
-#define PSSCLI_STATUS_DONE 128 // if message can be garbage collected
+#define PSSCLI_STATUS_VALID 2 // if message has been parsed successfully
+#define PSSCLI_STATUS_X 4 // if message is in transit
+#define PSSCLI_STATUS_COMPLETE 8 // if message has been received in full
 
 enum psscli_cmd_code {
 	PSSCLI_CMD_NONE,

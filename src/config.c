@@ -17,12 +17,13 @@ void psscli_config_init() {
 }
 
 int psscli_config_parse(int c, char **v, int errLen, char *zErr) {
-	char b[32];
+	char b[1024];
 	int o;
+	void *actualarg;
 
-	memset(b, 0, 32);
 
 	while ((o = getopt(c, v, "h:p:")) != -1) {
+		memset(b, 0, 1024);
 		switch(o) {
 			case 'h':
 				strcpy(conf.host, optarg);
@@ -37,6 +38,9 @@ int psscli_config_parse(int c, char **v, int errLen, char *zErr) {
 			case 's':
 				strcpy(conf.sock, optarg);
 				break;
+			case 'd':
+				strcpy(conf.datadir, optarg);
+				break;
 //			default:
 //				sprintf(b, "Invalid argument -%s", o);
 //				if (strlen(b) < errLen) {
@@ -47,5 +51,12 @@ int psscli_config_parse(int c, char **v, int errLen, char *zErr) {
 		}
 	}
 
+	return 0;
+}
+
+// sets pointer r to default value if passed value v is invalid
+// returns > 0 if field is invalid
+// l is cap of v
+int psscli_config_get_default(int field, int l, void *v) {
 	return 0;
 }

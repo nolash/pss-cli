@@ -16,6 +16,7 @@ obj:
 	gcc -g3 ${INCLUDE} -c ${SRCDIR}/error.c -o ${BUILDDIR}/error.o
 	#gcc -g3 ${INCLUDE} -c ${SRCDIR}/callback.c -o ${BUILDDIR}/callback.o
 	gcc -g3 ${INCLUDE} -c ${SRCDIR}/sync.c -o ${BUILDDIR}/sync.o
+	gcc -g3 ${INCLUDE} -c ${SRCDIR}/crypt.c -o ${BUILDDIR}/crypt.o
 
 test-ws: obj
 	gcc -g3 ${INCLUDE} -o ${BUILDDIR}/test_ws.o -c ${TESTDIR}/node/ws.c
@@ -37,7 +38,7 @@ test-smoke: obj
 	gcc -g3 ${CFLAGS} ${INCLUDE} -o ${BUILDDIR}/test_smoke.o -c ${TESTDIR}/node/smoke.c
 	gcc -g3 ${INCLUDE} -o ${BUILDDIR}/test_smoke ${BUILDDIR}/test_smoke.o ${BUILDDIR}/server.o ${BUILDDIR}/std.o ${BUILDDIR}/cmd.o ${BUILDDIR}/ws.o $(BUILDDIR)/config.o $(BUILDDIR)/minq.o $(BUILDDIR)/callback.o ${BUILDDIR}/sync.o -lwebsockets -lpthread -ljson-c
 
-test-unit: obj
+test-unit: obj test-tmp
 	gcc -g3 ${INCLUDE} -o ${BUILDDIR}/test_minq.o -c ${TESTDIR}/unit/minq.c
 	gcc -g3 ${INCLUDE} -o ${BUILDDIR}/test_minq ${BUILDDIR}/test_minq.o ${BUILDDIR}/minq.o
 	gcc -g3 ${INCLUDE} -o ${BUILDDIR}/test_cmd.o -c ${TESTDIR}/unit/cmd.c
@@ -46,6 +47,11 @@ test-unit: obj
 	gcc -g3 ${INCLUDE} -o ${BUILDDIR}/test_ws ${BUILDDIR}/test_ws.o ${BUILDDIR}/cmd.o ${BUILDDIR}/minq.o ${BUILDDIR}/ws.o ${BUILDDIR}/sync.o -ljson-c -lwebsockets -lpthread
 	gcc -g3 ${INCLUDE} -o ${BUILDDIR}/test_server.o -c ${TESTDIR}/unit/server.c
 	gcc -g3 ${INCLUDE} -o ${BUILDDIR}/test_server ${BUILDDIR}/test_server.o ${BUILDDIR}/cmd.o ${BUILDDIR}/minq.o ${BUILDDIR}/server.o ${BUILDDIR}/config.o ${BUILDDIR}/sync.o -lpthread
+
+test-tmp: obj
+	gcc -g3 ${INCLUDE} -o ${BUILDDIR}/test_crypt.o -c ${TESTDIR}/unit/crypt.c
+	gcc -g3 ${INCLUDE} -o ${BUILDDIR}/test_crypt ${BUILDDIR}/test_crypt.o ${BUILDDIR}/crypt.o -lsodium
+
 #
 #tools: obj
 #	gcc -g3 ${INCLUDE} -o ${BUILDDIR}/pssd.o -c ${TOOLSDIR}/pssd.c

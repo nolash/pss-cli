@@ -10,4 +10,6 @@ This software is pre-alpha.
 * libjson-c
 * libxdg-basedir
 * libpthread
-* https://github.com/ethersphere/go-ethereum (branch: swarm-network-rewrite)
+* libsodium
+* libncurses
+* a node running swarm (http://swarm-gateways.net/bzz:/theswarm.net)
