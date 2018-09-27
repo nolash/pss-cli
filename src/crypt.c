@@ -8,21 +8,26 @@
 
 extern struct psscli_config conf;
 
-PRIVATE char **publickeys; // randombytes_kx_PUBLICKEYBYTES;
-PRIVATE char **privatekeys; // [randombytes_kx_PRIVATEKEYBYTES];
+PRIVATE psscli_key_connect **keyconnects;
+PRIVATE psscli_key **keys;
 PRIVATE long keys_count = 0;
+
+// for encrypting local log msgs
+PRIVATE char localkey[PSSCLI_CRYPT_LOGKEY_LENGTH];
+
 PRIVATE char master_seed[randombytes_SEEDBYTES];
 PRIVATE char have_seed = 0;
+PRIVATE unsigned char *gpwd; // global password, used for unlocking seed
 
 PRIVATE void generate_seed();
 PRIVATE int open_seed();
 PRIVATE void close_seed();
-PRIVATE int derived_seed(const unsigned long idx, char *pw, char seed[crypto_kx_SEEDBYTES]);
+PRIVATE int derived_seed(const unsigned long idx, char seed[crypto_kx_SEEDBYTES]);
 
 // flags = settings
 // idx = index of key to derive
 // pw = password to unlock stored seed (ignored if newkey)
-int psscli_crypt_init(int flags, int idx, char *pw) {
+int psscli_crypt_init(int flags, int idx, char *pwd) {
 	if (sodium_init() < 0) {
 		return PSSCLI_ENOINIT;
 	}
@@ -34,45 +39,91 @@ int psscli_crypt_init(int flags, int idx, char *pw) {
 	}
 	if (!have_seed) {
 		generate_seed();
+		randombytes_buf(localkey, PSSCLI_CRYPT_LOGKEY_LENGTH);
 	}
-	publickeys = malloc(sizeof(**publickeys)*1024);
-	privatekeys = malloc(sizeof(**publickeys)*1024);
+	keyconnects = malloc(sizeof(psscli_key_connect**)*PSSCLI_KEY_CAPACITY);
+	keys = malloc(sizeof(psscli_key**)*PSSCLI_KEY_CAPACITY);
+	gpwd = pwd;
+
 	return 0;
 }
 
-// idx is index of key to create, will be mapped to peer
+unsigned char* getpassword() {
+	return gpwd;
+}
+
+// idx stores the index of created key, will be mapped to peer
+// returns error
 // \todo needs to be thread safe
-int psscli_crypt_generate_key(char *pw) {
+int psscli_crypt_generate_key(int *zIdx) {
 	char seed[crypto_kx_SEEDBYTES];
 	int r;
-	if ((r = derived_seed(keys_count, pw, seed)) != PSSCLI_EOK) {
+	if ((r = derived_seed(keys_count, seed)) != PSSCLI_EOK) {
 		return r;
 	}
-	*(publickeys+keys_count) = malloc(crypto_kx_PUBLICKEYBYTES);
-	*(privatekeys+keys_count) = malloc(crypto_kx_SECRETKEYBYTES);
-	memset(*(publickeys+keys_count), 0, crypto_kx_PUBLICKEYBYTES);
-	memset(*(privatekeys+keys_count), 0, crypto_kx_SECRETKEYBYTES);
-	crypto_kx_seed_keypair(*(publickeys+keys_count), *(privatekeys+keys_count), seed);		
+	*(keys+keys_count) = malloc(sizeof(psscli_key));
+	memset((*(keys+keys_count))->pub, 0, crypto_kx_PUBLICKEYBYTES);
+	memset((*(keys+keys_count))->sec, 0, crypto_kx_SECRETKEYBYTES);
+	crypto_kx_seed_keypair((*(keys+keys_count))->pub, (*(keys+keys_count))->sec, seed);		
 	keys_count++;
+	*zIdx = keys_count;
 
 	return PSSCLI_EOK;
 }
 
-// \todo fill the empty array space
-int psscli_crypt_free_key(unsigned long idx) {
-	free(publickeys+idx);
-	free(privatekeys+idx);
+// from incoming session key, create outgoing session key and link 
+// returns normal error
+int psscli_crypt_connect(psscli_publickey remote, psscli_key_connect *c) {
+	int newidx;
+	int r;
+
+	if ((r = psscli_crypt_generate_key(&newidx))) {
+		return r;
+	}
+	
+	memcpy(c->remote, remote, crypto_kx_PUBLICKEYBYTES);
+	c->local = *(keys+newidx);
+
+	return PSSCLI_EOK;
 }
 
-int psscli_crypt_get_key(unsigned long idx, psscli_publickey *k) {
-	memcpy(k->key, *(publickeys+idx), crypto_kx_PUBLICKEYBYTES);
+int psscli_crypt_new_session(psscli_key_connect *c, unsigned char *sessionkey) {
+	randombytes_buf(c->in, PSSCLI_CRYPT_SESSIONKEY_LENGTH);
+	memcpy(c->out, sessionkey, PSSCLI_CRYPT_SESSIONKEY_LENGTH);
+	return PSSCLI_EOK;
+}
+
+// get keys by 
+int psscli_crypt_get_key(unsigned int idx, psscli_publickey k) {
+	memcpy(k, (*(keys+idx))->pub, crypto_kx_PUBLICKEYBYTES);
 	return 0;
+}
+
+// encrypts and returns ciphertext to target and local copy
+// buffers 
+int psscli_crypt_encrypt(const psscli_key_connect *c, const unsigned char *msg, const int msglen, unsigned char **zOut, unsigned char **zLocal) {
+	unsigned char nonce[crypto_secretbox_NONCEBYTES];
+	randombytes_buf(nonce, crypto_secretbox_NONCEBYTES);	
+	randombytes_buf(nonce, crypto_secretbox_NONCEBYTES);	
+	crypto_secretbox_easy(*zOut, msg, msglen, nonce, c->out);
+	crypto_secretbox_easy(*zLocal, msg, msglen, nonce, localkey);
+	return PSSCLI_EOK;
+}
+
+void psscli_crypt_free() {
+	int i;
+
+	for (i = 0; i < keys_count; i++) {
+		free(*(keys+i));
+	}
+	free(keys);
+	free(keyconnects);
 }
 
 /***
  * \todo endian derive index check
 */
-int derived_seed(const unsigned long idx, char *pw, char seed[crypto_kx_SEEDBYTES]) {
+int derived_seed(const unsigned long idx, char seed[crypto_kx_SEEDBYTES]) {
 	int copybytes;
 
 	unsigned char hash[crypto_generichash_BYTES];
