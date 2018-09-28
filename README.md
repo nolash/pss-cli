@@ -12,4 +12,4 @@ This software is pre-alpha.
 * libpthread
 * libsodium
 * libncurses
-* a node running swarm (http://swarm-gateways.net/bzz:/theswarm.net)
+* a node running swarm (http://swarm-gateways.net/bzz:/theswarm.eth)
