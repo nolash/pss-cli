@@ -22,7 +22,14 @@ typedef struct psscli_key_connect {
 	unsigned char in[PSSCLI_CRYPT_SESSIONKEY_LENGTH];
 	unsigned char out[PSSCLI_CRYPT_SESSIONKEY_LENGTH];
 	psscli_key *local;
+	unsigned char nonceBase[crypto_secretbox_NONCEBYTES];
+	unsigned long nonceBaseTail;
 } psscli_key_connect;
+
+typedef struct psscli_log {
+	unsigned char *msg;
+	unsigned long nonceInc;
+} psscli_log;
 
 
 int psscli_crypt_init(int flags, int idx, char *pw);
@@ -37,6 +44,8 @@ int psscli_crypt_connect(psscli_publickey remote, psscli_key_connect *c);
 int psscli_crypt_new_session(psscli_key_connect *c, unsigned char *sessionkey);
 
 int psscli_crypt_encrypt(const psscli_key_connect *c, const unsigned char *msg, const int msglen, unsigned char **zOut, unsigned char **zLocal);
+
+int psscli_crypt_decrypt(const psscli_key_connect *c, const unsigned char *msg, const int msglen, unsigned char *nonce, unsigned char **zClearOut, unsigned char **zLocal);
 
 void psscli_crypt_free();
 

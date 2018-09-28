@@ -9,10 +9,15 @@
 int main() {
 	int r;
 	int i;
-	char *msg = "Everything looks bad if you remember it";
-	int cipherlen = (int)strlen(msg) + crypto_secretbox_MACBYTES;
+
+	unsigned char *msg = malloc(sizeof(char)*1024);
+	unsigned char *msg_result = malloc(sizeof(char)*1024);
+	unsigned char *msgcontent = "Everything looks bad if you remember it";
+
+	int cipherlen = (int)strlen(msgcontent) + crypto_secretbox_MACBYTES;
 	unsigned char *msg_out = malloc(sizeof(char)*cipherlen);
 	unsigned char *msg_local = malloc(sizeof(char)*cipherlen);
+
 
 	int keyidx;
 	psscli_publickey k;
@@ -31,7 +36,6 @@ int main() {
 		return 3;	
 	}
 
-
 	psscli_crypt_free();
 
 	if ((r = psscli_crypt_connect(k, &kc))) {
@@ -43,6 +47,7 @@ int main() {
 		return 5;
 	}
 
+	strcpy(msg, msgcontent);
 	if ((r = psscli_crypt_encrypt(&kc, msg, strlen(msg), &msg_out, &msg_local))) {
 		return 6;
 	}
@@ -51,20 +56,37 @@ int main() {
 	for (i = 0; i < crypto_kx_PUBLICKEYBYTES; i++) {
 		printf("%02x", (unsigned char)k[i]);	
 	}
-	printf("\nmsg: %s\nout: ", msg);
+	printf("\nmsg: %s\ncipher: ", msg);
 
 	for (i = 0; i < cipherlen; i++) {
 		printf("%02x", (unsigned char)msg_out[i]);	
 	}
-	printf("\nlocal: ");
+	printf("\nout local: ");
 	for (i = 0; i < cipherlen; i++) {
 		printf("%02x", (unsigned char)msg_local[i]);	
 	}
 	printf("\n");
 
+	(*((unsigned long*)(kc.nonceBase+(crypto_secretbox_NONCEBYTES-sizeof(unsigned long)))))--;
+	memcpy(kc.in, kc.out, PSSCLI_CRYPT_SESSIONKEY_LENGTH);
+	if ((r = psscli_crypt_decrypt(&kc, msg_out, cipherlen, kc.nonceBase, &msg_result, &msg_local))) {
+		return 7;
+	}
 
-	free(msg_out);
+	printf("---\nplain: %s\nin local: ", msg);
+	for (i = 0; i < cipherlen; i++) {
+		printf("%02x", (unsigned char)msg_local[i]);	
+	}
+	printf("\n");
+
+	if (strcmp(msg, msg_result)) {
+		return 8;
+	}
+
 	free(msg_local);
+	free(msg_out);
+	free(msg_result);
+	free(msg);
 
 	return 0;
 }

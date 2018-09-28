@@ -77,9 +77,15 @@ int psscli_crypt_connect(psscli_publickey remote, psscli_key_connect *c) {
 	int newidx;
 	int r;
 
+	// for now we create a new key every time
+	// later on we should link existing key, and create outside
 	if ((r = psscli_crypt_generate_key(&newidx))) {
 		return r;
 	}
+	randombytes_buf(c->nonceBase, crypto_secretbox_NONCEBYTES);
+
+	// the base tail is the original last bytes of the nonce. We keep this for later reference, in case we need to restore something with it
+	memcpy(&c->nonceBaseTail, c->nonceBase+(crypto_secretbox_NONCEBYTES-sizeof(c->nonceBaseTail)), sizeof(c->nonceBaseTail));
 	
 	memcpy(c->remote, remote, crypto_kx_PUBLICKEYBYTES);
 	c->local = *(keys+newidx);
@@ -100,13 +106,32 @@ int psscli_crypt_get_key(unsigned int idx, psscli_publickey k) {
 }
 
 // encrypts and returns ciphertext to target and local copy
-// buffers 
 int psscli_crypt_encrypt(const psscli_key_connect *c, const unsigned char *msg, const int msglen, unsigned char **zOut, unsigned char **zLocal) {
-	unsigned char nonce[crypto_secretbox_NONCEBYTES];
-	randombytes_buf(nonce, crypto_secretbox_NONCEBYTES);	
-	randombytes_buf(nonce, crypto_secretbox_NONCEBYTES);	
-	crypto_secretbox_easy(*zOut, msg, msglen, nonce, c->out);
-	crypto_secretbox_easy(*zLocal, msg, msglen, nonce, localkey);
+	crypto_secretbox_easy(*zOut, msg, msglen, c->nonceBase, c->out);
+
+	// crypt for local logfile
+	crypto_secretbox_easy(*zLocal, msg, msglen, c->nonceBase, localkey);
+
+	// case the nonce base tail to long and increment it
+	(*((unsigned long*)(c->nonceBase+(crypto_secretbox_NONCEBYTES-sizeof(unsigned long)))))++;
+
+	return PSSCLI_EOK;
+}
+
+// decrypts and returns plaintext to target and local copy
+int psscli_crypt_decrypt(const psscli_key_connect *c, const unsigned char *msg, const int msglen, unsigned char *nonce, unsigned char **zClearOut, unsigned char **zLocal) {
+	int r;
+
+	if ((r = crypto_secretbox_open_easy(*zClearOut, msg, msglen, nonce, c->in)) != 0) {
+		return PSSCLI_ECRYPT;
+	}
+
+	// create the nonce for the log message
+	crypto_secretbox_easy(*zLocal, *zClearOut, msglen-crypto_secretbox_MACBYTES, c->nonceBase, localkey);
+
+	// case the nonce base tail to long and increment it
+	(*((unsigned long*)(c->nonceBase+(crypto_secretbox_NONCEBYTES-sizeof(unsigned long)))))++;
+
 	return PSSCLI_EOK;
 }
 

@@ -14,6 +14,7 @@ enum psscli_error {
 	PSSCLI_EOVERFLOW,
 	PSSCLI_ESYNC,
 	PSSCLI_EKEY,
+	PSSCLI_ECRYPT,
 };
 
 char psscli_error_string[1024];
